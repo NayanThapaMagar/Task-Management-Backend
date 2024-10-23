@@ -1,17 +1,19 @@
 import { Request, Response } from 'express';
-import Subtask from '../models/subTaskModel';
+import Subtask from '../models/subtaskModel';
 import Task from '../models/taskModel';
-import mongoose, { Types } from 'mongoose';
+import { createNotification } from '../utils/notifications'
+import { Types } from 'mongoose';
 
 const validStatuses = ['pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 
-// Admin: Create a Subtask
 export const createSubtask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
+    const creatorId = req.user?.id;
+
     try {
         const { title, description, priority, assignedTo } = req.body;
-        const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+        const isValidObjectId = Types.ObjectId.isValid(taskId);
         if (!isValidObjectId) {
             res.status(404).json({ message: 'Invalid Task' });
             return
@@ -21,14 +23,42 @@ export const createSubtask = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Task not found' });
             return;
         }
+
+        // Initialize assignedTo to an empty array if not provided
+        const assignedUsers = Array.isArray(assignedTo) ? assignedTo : [];
+
         const subtask = await Subtask.create({
             title,
             description,
             priority,
             creator: req.user?.id,
-            assignedTo,
+            assignedTo: assignedUsers.length > 0 ? assignedUsers : undefined,
             taskId, // Reference to the parent task
         });
+
+        // Notify the task admin (if they are not the creator)
+        if (task.creator.toString() !== creatorId) {
+            createNotification({
+                userId: task.creator,
+                message: `A new subtask ${subtask.title} has been created for your task: ${task.title}.`,
+                taskId: task._id as Types.ObjectId,
+                subtaskId: subtask._id as Types.ObjectId,
+            });
+        }
+
+        if (assignedUsers.length > 0) {
+            // Notify assigned users (excluding the creator)
+            assignedUsers
+                .filter(userId => userId.toString() !== creatorId)
+                .forEach(userId => {
+                    createNotification({
+                        userId,
+                        message: `You have been assigned to the subtask: ${subtask.title} of task: ${task.title}.`,
+                        subtaskId: subtask._id as Types.ObjectId,
+                    });
+                });
+        }
+
         res.status(201).json(subtask);
     } catch (error) {
         res.status(500).json({ message: 'Error creating subtask', error });
@@ -38,7 +68,7 @@ export const createSubtask = async (req: Request, res: Response) => {
 export const getSubtasksBySubtaskId = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(subtaskId);
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Subtask' });
         return
@@ -55,32 +85,106 @@ export const getSubtasksBySubtaskId = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error fetching subtask', error });
     }
 };
-// Admin: Update Subtask Details
+
 export const updateSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(subtaskId);
+    const updaterId = req.user?.id
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
     }
+
     const { title, description, priority, assignedTo } = req.body;
-    const updates = { title, description, priority, assignedTo };
+
     try {
-        const subtask = await Subtask.findByIdAndUpdate(subtaskId, updates, { new: true, runValidators: true });
-        if (!subtask) {
+        // Fetch the existing subtask
+        const existingSubtask = await Subtask.findById(subtaskId).populate('taskId');
+        if (!existingSubtask) {
             res.status(404).json({ message: 'Subtask not found' });
             return;
         }
-        res.status(200).json(subtask);
+
+        const task = existingSubtask.taskId as any;
+        // Prepare updates
+        const updates: any = { title, description, priority };
+
+        // Only update assignedTo if it is provided
+        if (assignedTo !== undefined) {
+            updates.assignedTo = assignedTo;
+        }
+
+        // Update the task
+        const updatedSubtask = await Subtask.findByIdAndUpdate(subtaskId, updates, { new: true, runValidators: true });
+
+        // Check if the updatedSubtask is null
+        if (!updatedSubtask) {
+            res.status(404).json({ message: 'Subtask not found after update' });
+            return;
+        }
+
+        // Handle notifications for assigned users
+        if (assignedTo !== undefined) {
+            const previousAssignedUsers = existingSubtask.assignedTo || [];
+            const newAssignedUsers = assignedTo || [];
+
+            // Determine newly assigned and removed users
+            const addedUsers = newAssignedUsers.filter((user: Types.ObjectId) => !previousAssignedUsers.includes(user));
+            const removedUsers = previousAssignedUsers.filter(user => !newAssignedUsers.includes(user));
+
+            // Notify newly assigned users, excluding the updater
+            addedUsers
+                .filter((userId: Types.ObjectId) => userId.toString() !== updaterId)
+                .forEach((userId: Types.ObjectId) => {
+                    createNotification({
+                        userId,
+                        message: `You have been assigned to the subtask: ${updatedSubtask.title} of task: ${task.title}.`,
+                        taskId: task._id as Types.ObjectId,
+                        subtaskId: updatedSubtask._id as Types.ObjectId,
+                    });
+                });
+
+            // Notify users who were removed from the subtask
+            removedUsers.forEach(userId => {
+                createNotification({
+                    userId,
+                    message: `You have been removed from the subtask: ${updatedSubtask.title} of task: ${task.title}.`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: updatedSubtask._id as Types.ObjectId,
+                });
+            });
+        }
+
+        // Notify task admin if they are not the updater
+        if (task.creator.toString() !== updaterId) {
+            createNotification({
+                userId: task.creator,
+                message: `The subtask ${updatedSubtask.title} in your task ${task.title} has been updated.`,
+                taskId: task._id as Types.ObjectId,
+                subtaskId: updatedSubtask._id as Types.ObjectId,
+            });
+        }
+        // Notify the subtask creator (subtask admin) if they didn't update the status
+        if (updatedSubtask.creator.toString() !== updaterId) {
+            createNotification({
+                userId: updatedSubtask.creator,
+                message: `The subtask ${updatedSubtask.title} in your task ${task.title} has been updated.`,
+                taskId: task._id as Types.ObjectId,
+                subtaskId: updatedSubtask._id as Types.ObjectId,
+            });
+        }
+        res.status(200).json(updatedSubtask);
     } catch (error) {
         res.status(500).json({ message: 'Error updating subtask', error });
     }
 };
 
-// Assignee: Update Subtask Status
 export const updateSubtaskStatus = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(subtaskId);
+    const updaterId = req.user?.id;
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
@@ -96,27 +200,63 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Subtask not found' });
             return;
         }
+
+        // Get the parent task
+        const task = await Task.findById(subtask.taskId);
+        if (!task) {
+            res.status(404).json({ message: 'Parent task not found' });
+            return;
+        }
+
+        // Notify the task admin (task creator) if they didn't update the status
+        if (task.creator.toString() !== updaterId) {
+            createNotification({
+                userId: task.creator,
+                message: `The status of subtask ${subtask.title} has been updated to ${status}.`,
+                taskId: task._id as Types.ObjectId,
+                subtaskId: subtask._id as Types.ObjectId,
+            });
+        }
+
+        // Notify the subtask creator (subtask admin) if they didn't update the status
+        if (subtask.creator.toString() !== updaterId) {
+            createNotification({
+                userId: subtask.creator,
+                message: `The status of your subtask ${subtask.title} has been updated to ${status}.`,
+                taskId: task._id as Types.ObjectId,
+                subtaskId: subtask._id as Types.ObjectId,
+            });
+        }
+
+        // Notify all assigned users except the updater
+        const assignedTo = subtask.assignedTo || [];
+        assignedTo
+            .filter((userId: Types.ObjectId) => userId.toString() !== updaterId)
+            .forEach((userId: Types.ObjectId) => {
+                createNotification({
+                    userId,
+                    message: `The status of subtask ${subtask.title} has been updated to ${status}.`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            });
+
         res.json(subtask);
     } catch (error) {
         res.status(500).json({ message: 'Error updating subtask status', error });
     }
 };
 
-// Assignee: Add Comment to Subtask
 export const addCommentToSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(subtaskId);
+    const userId = req.user?.id; // ID of the user adding the comment
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
     }
     const { text } = req.body;
-    const userId = req.user?.id;
-
-    if (!userId) {
-        res.status(400).json({ message: 'User is not authorized to add a comment' });
-        return;
-    }
 
     try {
         const subtask = await Subtask.findById(subtaskId);
@@ -127,6 +267,44 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         const comment = { userId: new Types.ObjectId(userId), text, createdAt: new Date() };
         subtask.comments.push(comment);
         await subtask.save();
+
+        // Get the parent task
+        const task = await Task.findById(subtask.taskId);
+        if (task) {
+            // Notify the task creator (admin)
+            if (task.creator.toString() !== userId) {
+                createNotification({
+                    userId: task.creator,
+                    message: `A new comment has been added to the subtask ${subtask.title} of your task ${task.title}: ${text}`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask creator (admin)
+            if (subtask.creator.toString() !== userId) {
+                createNotification({
+                    userId: subtask.creator,
+                    message: `A new comment has been added to your subtask ${subtask.title}: ${text}`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask assignees
+            const assignedTo = subtask.assignedTo || [];
+            assignedTo
+                .filter((assignedUserId: Types.ObjectId) => assignedUserId.toString() !== userId)
+                .forEach((assignedUserId: Types.ObjectId) => {
+                    createNotification({
+                        userId: assignedUserId,
+                        message: `A new comment has been added to the subtask ${subtask.title}: ${text}`,
+                        taskId: task._id as Types.ObjectId,
+                        subtaskId: subtask._id as Types.ObjectId,
+                    });
+                });
+        }
+
         res.json(subtask);
     } catch (error) {
         res.status(500).json({ message: 'Error adding comment to subtask', error });
@@ -136,7 +314,9 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
 // Delete Subtask
 export const deleteSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(subtaskId);
+    const userId = req.user?.id; // ID of the user deleting the subtask
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
 
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
@@ -149,6 +329,43 @@ export const deleteSubtask = async (req: Request, res: Response) => {
         if (!subtask) {
             res.status(404).json({ message: 'Subtask not found' });
             return;
+        }
+
+        // Get the parent task
+        const task = await Task.findById(subtask.taskId);
+        if (task) {
+            // Notify the task creator (admin)
+            if (task.creator.toString() !== userId) {
+                createNotification({
+                    userId: task.creator,
+                    message: `The subtask ${subtask.title} has been deleted from your task ${task.title}.`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask creator (admin)
+            if (subtask.creator.toString() !== userId) {
+                createNotification({
+                    userId: subtask.creator,
+                    message: `Your subtask ${subtask.title} has been deleted.`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask assignees
+            const assignedTo = subtask.assignedTo || [];
+            assignedTo
+                .filter((assignedUserId: Types.ObjectId) => assignedUserId.toString() !== userId)
+                .forEach((assignedUserId: Types.ObjectId) => {
+                    createNotification({
+                        userId: assignedUserId,
+                        message: `The subtask ${subtask.title} has been deleted.`,
+                        taskId: task._id as Types.ObjectId,
+                        subtaskId: subtask._id as Types.ObjectId,
+                    });
+                });
         }
 
         await subtask.deleteOne();
@@ -167,7 +384,7 @@ const getPagination = (page: number, limit: number) => {
 // Get All Subtasks (for Admin)
 export const getAllSubtasksForTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
@@ -212,7 +429,7 @@ export const getMySubtasksForTask = async (req: Request, res: Response) => {
     };
 
     const userId = req.user?.id;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId); // Validate task ID
+    const isValidObjectId = Types.ObjectId.isValid(taskId); // Validate task ID
 
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Task ID' });
@@ -254,7 +471,7 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
     };
 
     const userId = req.user?.id; // Get the user ID from the request
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId); // Validate task ID
+    const isValidObjectId = Types.ObjectId.isValid(taskId); // Validate task ID
 
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Task ID' });

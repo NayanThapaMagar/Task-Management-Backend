@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import Task from '../models/taskModel';
-import Subtask from '../models/subTaskModel';
-import { log } from 'console';
+import Subtask from '../models/subtaskModel';
 const mongoose = require('mongoose');
 
 export const isTaskAdmin = async (req: Request, res: Response, next: NextFunction) => {
