@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import Task from '../models/taskModel';
 import Subtask from '../models/subtaskModel';
 import { createNotification } from '../utils/notifications';
+import { arraysEqual } from '../utils/arrayUtils';
 import { Types } from 'mongoose';
-const mongoose = require('mongoose');
+
 
 
 const validStatuses = ['pending', 'completed'];
@@ -46,7 +47,7 @@ export const createTask = async (req: Request, res: Response) => {
 export const getTaskById = async (req: Request, res: Response) => {
     const { taskId } = req.params;
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId); // Validate task ID
+    const isValidObjectId = Types.ObjectId.isValid(taskId); // Validate task ID
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Task ID' });
         return
@@ -67,7 +68,7 @@ export const getTaskById = async (req: Request, res: Response) => {
 // Admin: Update Task Details
 export const updateTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
@@ -83,12 +84,21 @@ export const updateTask = async (req: Request, res: Response) => {
             return;
         }
 
-        // Prepare updates
-        const updates: any = { title, description, priority };
+        // Compare new values with existing values
+        const updates: any = {};
+        if (title && title !== existingTask.title) updates.title = title;
+        if (description && description !== existingTask.description) updates.description = description;
+        if (priority && priority !== existingTask.priority) updates.priority = priority;
 
-        // Only update assignedTo if it is provided
-        if (assignedTo !== undefined) {
+        // Only update assignedTo if it is provided and different
+        if (assignedTo !== undefined && !arraysEqual(assignedTo, existingTask.assignedTo)) {
             updates.assignedTo = assignedTo;
+        }
+
+        // If no new updates, skip the update process
+        if (Object.keys(updates).length === 0) {
+            res.status(200).json({ message: 'No changes detected, task not updated' });
+            return;
         }
 
         // Update the task
@@ -138,22 +148,28 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const userId = req.user?.id;
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
     }
     const { status } = req.body;
     try {
-        const task = await Task.findByIdAndUpdate(
-            taskId,
-            { status },
-            { new: true, runValidators: true }
-        );
+        const task = await Task.findById(taskId);
         if (!task) {
             res.status(404).json({ message: 'Task not found' });
             return;
         }
+
+        // Check if the new status is the same as the current status
+        if (task.status === status) {
+            res.status(200).json({ message: 'No changes detected, status not updated' });
+            return;
+        }
+
+        // Update the task status
+        task.status = status;
+        await task.save({ validateBeforeSave: true });
 
         // Notify the creator if they are not the one making the change
         if (task.creator.toString() !== userId) {
@@ -186,7 +202,7 @@ export const addComment = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const userId = req.user?.id;
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
         return;
@@ -236,7 +252,7 @@ export const deleteTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const userId = req.user?.id;
 
-    const isValidObjectId = mongoose.Types.ObjectId.isValid(taskId);
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
 
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });

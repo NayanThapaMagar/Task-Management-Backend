@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import Subtask from '../models/subtaskModel';
 import Task from '../models/taskModel';
 import { createNotification } from '../utils/notifications'
+import { arraysEqual } from '../utils/arrayUtils';
 import { Types } from 'mongoose';
 
 const validStatuses = ['pending', 'completed'];
@@ -107,12 +108,23 @@ export const updateSubtask = async (req: Request, res: Response) => {
         }
 
         const task = existingSubtask.taskId as any;
-        // Prepare updates
-        const updates: any = { title, description, priority };
 
-        // Only update assignedTo if it is provided
-        if (assignedTo !== undefined) {
+        // Prepare updates
+        // Compare new values with existing values
+        const updates: any = {};
+        if (title && title !== existingSubtask.title) updates.title = title;
+        if (description && description !== existingSubtask.description) updates.description = description;
+        if (priority && priority !== existingSubtask.priority) updates.priority = priority;
+
+        // Only update assignedTo if it is provided and different
+        if (assignedTo !== undefined && !arraysEqual(assignedTo, existingSubtask.assignedTo)) {
             updates.assignedTo = assignedTo;
+        }
+
+        // If no new updates, skip the update process
+        if (Object.keys(updates).length === 0) {
+            res.status(200).json({ message: 'No changes detected, subtask not updated' });
+            return;
         }
 
         // Update the task
@@ -191,11 +203,7 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
     }
     const { status } = req.body;
     try {
-        const subtask = await Subtask.findByIdAndUpdate(
-            subtaskId,
-            { status },
-            { new: true, runValidators: true }
-        );
+        const subtask = await Subtask.findById(subtaskId);
         if (!subtask) {
             res.status(404).json({ message: 'Subtask not found' });
             return;
@@ -207,6 +215,16 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Parent task not found' });
             return;
         }
+
+        // Check if the new status is the same as the current status
+        if (subtask.status === status) {
+            res.status(200).json({ message: 'No changes detected, status not updated' });
+            return;
+        }
+
+        // Update the subtask status
+        subtask.status = status;
+        await subtask.save({ validateBeforeSave: true });
 
         // Notify the task admin (task creator) if they didn't update the status
         if (task.creator.toString() !== updaterId) {
