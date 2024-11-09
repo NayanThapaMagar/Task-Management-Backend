@@ -7,7 +7,7 @@ import { Types } from 'mongoose';
 
 
 
-const validStatuses = ['pending', 'completed'];
+const validStatuses = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 // Admin: Create a Task
 export const createTask = async (req: Request, res: Response) => {
@@ -319,8 +319,8 @@ export const getAllTasks = async (req: Request, res: Response) => {
     // Validate and set `priority`
     if (priority && validPriorities.includes(priority))
         filters.priority = priority;
-
-
+    
+    
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const tasks = await Task.find({
@@ -341,7 +341,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
 };
 
 // Get Tasks Created by User (My Tasks)
-export const getMyTasks = async (req: Request, res: Response) => {
+export const getMyTasks = async (req: Request, res: Response) => {  
     const { status, priority, page = '1', limit = '10' } = req.query as {
         status?: string;
         priority?: string;

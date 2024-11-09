@@ -17,9 +17,9 @@ const router = express.Router();
 
 
 router.get('/', authenticateUser, getAllTasks);
-router.get('/:taskId', authenticateUser, isTaskAdminOrAssignee, getTaskById);
 router.get('/my-tasks', authenticateUser, getMyTasks);
 router.get('/assigned-tasks', authenticateUser, getAssignedTasks);
+router.get('/:taskId', authenticateUser, isTaskAdminOrAssignee, getTaskById);
 
 router.post('/', authenticateUser, createTask);
 router.put('/:taskId', authenticateUser, isTaskAdmin, updateTask);

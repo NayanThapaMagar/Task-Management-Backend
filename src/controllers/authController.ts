@@ -14,9 +14,15 @@ export const registerUser: RequestHandler = async (req: Request, res: Response) 
     }
 
     try {
-        const existingUser = await User.findOne({ email }) || await User.findOne({ username });
+        const existingUser = await User.findOne({
+            $or: [{ email }, { username }]
+        });
+
         if (existingUser) {
-            res.status(400).json({ message: 'User already exists' });
+            const conflictField = existingUser.email === email ? 'email' : 'username';
+            res.status(401).json({
+                message: `User with this ${conflictField} already exists. Please try with a different ${conflictField}.`
+            });
             return;
         }
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -37,12 +43,12 @@ export const loginUser: RequestHandler = async (req: Request, res: Response) => 
     try {
         const user = await User.findOne({ email });
         if (!user) {
-            res.status(400).json({ message: 'Invalid credentials' });
+            res.status(400).json({ message: 'User not found' });
             return;
         }
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
-            res.status(400).json({ message: 'Invalid credentials' });
+            res.status(400).json({ message: 'Incorrect password' });
             return;
         }
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || '', {

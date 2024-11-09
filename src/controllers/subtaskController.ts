@@ -5,7 +5,7 @@ import { createNotification } from '../utils/notifications'
 import { arraysEqual } from '../utils/arrayUtils';
 import { Types } from 'mongoose';
 
-const validStatuses = ['pending', 'completed'];
+const validStatuses = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 
 export const createSubtask = async (req: Request, res: Response) => {

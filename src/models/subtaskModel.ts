@@ -9,7 +9,7 @@ interface Comment {
 export interface ISubtask extends Document {
     title: string;
     description: string;
-    status: 'pending' | 'completed';
+    status: 'to do' | 'pending' | 'completed';
     priority: 'low' | 'medium' | 'high';
     creator: Types.ObjectId; 
     assignedTo: Types.ObjectId[];
@@ -21,7 +21,7 @@ const subtaskSchema = new Schema<ISubtask>(
     {
         title: { type: String, required: true },
         description: { type: String, required: true },
-        status: { type: String, enum: ['pending', 'completed'], default: 'pending' },
+        status: { type: String, enum: ['to do', 'pending', 'completed'], default: 'to do' },
         priority: { type: String, enum: ['low', 'medium', 'high'], default: 'low' }, 
         creator: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         assignedTo: [{ type: Schema.Types.ObjectId, ref: 'User' }],
