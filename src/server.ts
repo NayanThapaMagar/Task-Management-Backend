@@ -5,6 +5,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes';
+import userConnectionRoutes from './routes/userConnectionRoutes';
 import taskRoutes from './routes/taskRoutes';
 import subtaskRoutes from './routes/subtaskRoutes';
 import notificationRoutes from './routes/notificationRoutes';
@@ -44,6 +45,7 @@ io.on('connection', (socket) => {
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/connections', userConnectionRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/subtasks', subtaskRoutes);
 app.use('/notifications', notificationRoutes);
