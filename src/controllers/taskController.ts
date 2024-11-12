@@ -14,6 +14,15 @@ export const createTask = async (req: Request, res: Response) => {
     try {
         const { title, description, priority, assignedTo } = req.body;
 
+        if (!title) {
+            res.status(400).json({ message: 'Title is required' });
+            return
+        }
+        const strippedDescription = description.replace(/<[^>]+>/g, '').trim();
+        if (!strippedDescription) {
+            res.status(400).json({ message: 'Description is required' });
+            return
+        }
         // Initialize assignedTo to an empty array if not provided
         const assignedUsers = Array.isArray(assignedTo) ? assignedTo : [];
 
@@ -37,7 +46,7 @@ export const createTask = async (req: Request, res: Response) => {
             });
         }
 
-        res.status(201).json(task);
+        res.status(201).json({ task, message: 'Task added succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error creating task', error });
     }
@@ -76,6 +85,16 @@ export const updateTask = async (req: Request, res: Response) => {
 
     const { title, description, priority, assignedTo } = req.body;
 
+    if (!title) {
+        res.status(400).json({ message: 'Title is required' });
+        return
+    }
+    const strippedDescription = description.replace(/<[^>]+>/g, '').trim();
+    if (!strippedDescription) {
+        res.status(400).json({ message: 'Description is required' });
+        return
+    }
+
     try {
         // Fetch the existing task
         const existingTask = await Task.findById(taskId);
@@ -97,7 +116,7 @@ export const updateTask = async (req: Request, res: Response) => {
 
         // If no new updates, skip the update process
         if (Object.keys(updates).length === 0) {
-            res.status(200).json({ message: 'No changes detected, task not updated' });
+            res.status(200).json({ message: 'No Changes Detected' });
             return;
         }
 
@@ -137,7 +156,7 @@ export const updateTask = async (req: Request, res: Response) => {
             });
         }
 
-        res.status(200).json(updatedTask);
+        res.status(200).json({ updatedTask, message: 'Task updated succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error updating task', error });
     }
@@ -191,7 +210,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
                 });
             }
         });
-        res.json(task);
+        res.json({ task, message: 'Task status updated!' });
     } catch (error) {
         res.status(500).json({ message: 'Error updating task status', error });
     }
@@ -241,7 +260,7 @@ export const addComment = async (req: Request, res: Response) => {
             }
         });
 
-        res.json(task);
+        res.json({ task, comment, message: 'Comment added!' });
     } catch (error) {
         res.status(500).json({ message: 'Error adding comment', error });
     }
@@ -250,7 +269,6 @@ export const addComment = async (req: Request, res: Response) => {
 // Delete Task and its associated Subtasks
 export const deleteTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
-    const userId = req.user?.id;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
 
@@ -287,7 +305,7 @@ export const deleteTask = async (req: Request, res: Response) => {
         // Delete the task
         await task.deleteOne();
 
-        res.status(200).json({ message: 'Task deleted successfully' });
+        res.status(200).json({ taskId, message: 'Task deleted successfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error deleting task', error });
     }
@@ -319,8 +337,8 @@ export const getAllTasks = async (req: Request, res: Response) => {
     // Validate and set `priority`
     if (priority && validPriorities.includes(priority))
         filters.priority = priority;
-    
-    
+
+
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const tasks = await Task.find({
@@ -341,7 +359,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
 };
 
 // Get Tasks Created by User (My Tasks)
-export const getMyTasks = async (req: Request, res: Response) => {  
+export const getMyTasks = async (req: Request, res: Response) => {
     const { status, priority, page = '1', limit = '10' } = req.query as {
         status?: string;
         priority?: string;

@@ -24,7 +24,7 @@ export const addUserConnection = async (req: Request, res: Response) => {
         }
 
         if (user.userConnection.includes(connectionUser._id)) {
-            res.status(400).json({ message: 'Connection already exists' });
+            res.status(409).json({ message: 'Connection already exists' });
             return;
         }
 
@@ -32,7 +32,7 @@ export const addUserConnection = async (req: Request, res: Response) => {
         user.userConnection.push(connectionUser._id);
         await user.save();
 
-        res.status(200).json({ newConnection: connectionUser });
+        res.status(200).json({ newConnection: connectionUser, message: 'New connection added succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error adding connection', error });
     }
@@ -87,7 +87,7 @@ export const deleteUserConnection = async (req: Request, res: Response) => {
         user.userConnection.splice(connectionIndex, 1);
         await user.save();
 
-        res.status(200).json({ message: 'Connection removed successfully' });
+        res.status(200).json({ id: connectionObjectId, message: 'Connection removed successfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error deleting connection', error });
     }
