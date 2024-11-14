@@ -7,7 +7,7 @@ import { Types } from 'mongoose';
 
 
 
-const validStatuses = ['to do', 'pending', 'completed'];
+const validStatus = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 // Admin: Create a Task
 export const createTask = async (req: Request, res: Response) => {
@@ -68,7 +68,7 @@ export const getTaskById = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Task not found' });
             return
         }
-        res.status(200).json(task); // Return the task
+        res.status(200).json({ task }); // Return the task
     } catch (error) {
         res.status(500).json({ message: 'Error fetching task', error });
     }
@@ -116,7 +116,7 @@ export const updateTask = async (req: Request, res: Response) => {
 
         // If no new updates, skip the update process
         if (Object.keys(updates).length === 0) {
-            res.status(200).json({ message: 'No Changes Detected' });
+            res.status(200).json({ updatedTask: existingTask, message: 'No Changes Detected' });
             return;
         }
 
@@ -173,6 +173,12 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         return;
     }
     const { status } = req.body;
+
+    if (!status || !validStatus.includes(status)) {
+        res.status(400).json({ message: 'Invalid Status' });
+        return;
+    }
+
     try {
         const task = await Task.findById(taskId);
         if (!task) {
@@ -182,7 +188,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 
         // Check if the new status is the same as the current status
         if (task.status === status) {
-            res.status(200).json({ message: 'No changes detected, status not updated' });
+            res.status(400).json({ message: 'No changes detected, status not updated' });
             return;
         }
 
@@ -212,7 +218,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         });
         res.json({ task, message: 'Task status updated!' });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating task status', error });
+        res.status(500).json({ message: 'Error updating task status!', error });
     }
 };
 
@@ -220,6 +226,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 export const addComment = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const userId = req.user?.id;
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
@@ -227,6 +234,11 @@ export const addComment = async (req: Request, res: Response) => {
         return;
     }
     const { text } = req.body;
+
+    if (!text) {
+        res.status(400).json({ message: 'Invalid Comment' });
+        return;
+    }
 
     try {
         const task = await Task.findById(taskId);
@@ -243,7 +255,7 @@ export const addComment = async (req: Request, res: Response) => {
         if (task.creator.toString() !== userId) {
             createNotification({
                 userId: task.creator,
-                message: `A new comment has been added to your task ${task.title}: ${text}`,
+                message: `${username} commented to your task ${task.title}: ${text}`,
                 taskId: task._id as Types.ObjectId,
             });
         }
@@ -254,7 +266,7 @@ export const addComment = async (req: Request, res: Response) => {
             if (assignedUserId.toString() !== userId) {
                 createNotification({
                     userId: assignedUserId,
-                    message: `A new comment has been added to the task ${task.title}: ${text}`,
+                    message: `${username} commented to your task ${task.title}: ${text}`,
                     taskId: task._id as Types.ObjectId,
                 });
             }
@@ -305,7 +317,7 @@ export const deleteTask = async (req: Request, res: Response) => {
         // Delete the task
         await task.deleteOne();
 
-        res.status(200).json({ taskId, message: 'Task deleted successfully!' });
+        res.status(200).json({ deletedTaskId: taskId, message: 'Task deleted successfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error deleting task', error });
     }
@@ -331,7 +343,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
     const filters: any = {};
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status))
+    if (status && validStatus.includes(status))
         filters.status = status;
 
     // Validate and set `priority`
@@ -371,7 +383,7 @@ export const getMyTasks = async (req: Request, res: Response) => {
     const filters: any = { creator: userId };
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status))
+    if (status && validStatus.includes(status))
         filters.status = status;
 
     // Validate and set `priority`
@@ -404,7 +416,7 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
     const filters: any = { assignedTo: userId };
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status))
+    if (status && validStatus.includes(status))
         filters.status = status;
 
     // Validate and set `priority`

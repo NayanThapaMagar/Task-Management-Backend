@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
 import Subtask from '../models/subtaskModel';
-import Task from '../models/taskModel';
+import Task, { ITask } from '../models/taskModel';
 import { createNotification } from '../utils/notifications'
 import { arraysEqual } from '../utils/arrayUtils';
 import { Types } from 'mongoose';
 
-const validStatuses = ['to do', 'pending', 'completed'];
+const validStatus = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 
 export const createSubtask = async (req: Request, res: Response) => {
@@ -27,6 +27,13 @@ export const createSubtask = async (req: Request, res: Response) => {
 
         // Initialize assignedTo to an empty array if not provided
         const assignedUsers = Array.isArray(assignedTo) ? assignedTo : [];
+
+        for (const user of assignedUsers) {
+            if (!task.assignedTo.includes(user)) {
+                res.status(422).json({ message: `User must be first assigned to ${task.title}` });
+                return;
+            }
+        }
 
         const subtask = await Subtask.create({
             title,
@@ -60,7 +67,7 @@ export const createSubtask = async (req: Request, res: Response) => {
                 });
         }
 
-        res.status(201).json(subtask);
+        res.status(201).json({ subtask, message: 'Subtask added succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error creating subtask', error });
     }
@@ -81,7 +88,7 @@ export const getSubtasksBySubtaskId = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Subtask not found' });
             return
         }
-        res.status(200).json(subtask); // Return the subtask
+        res.status(200).json({ subtask }); // Return the subtask
     } catch (error) {
         res.status(500).json({ message: 'Error fetching subtask', error });
     }
@@ -107,7 +114,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
             return;
         }
 
-        const task = existingSubtask.taskId as any;
+        const task = existingSubtask.taskId as unknown as ITask;
 
         // Prepare updates
         // Compare new values with existing values
@@ -127,6 +134,12 @@ export const updateSubtask = async (req: Request, res: Response) => {
             return;
         }
 
+        for (const user of assignedTo) {
+            if (!task.assignedTo.includes(user)) {
+                res.status(422).json({ message: `User must be first assigned to ${task.title}` });
+                return;
+            }
+        }
         // Update the task
         const updatedSubtask = await Subtask.findByIdAndUpdate(subtaskId, updates, { new: true, runValidators: true });
 
@@ -186,7 +199,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
                 subtaskId: updatedSubtask._id as Types.ObjectId,
             });
         }
-        res.status(200).json(updatedSubtask);
+        res.status(200).json({ updatedSubtask, message: 'Subtask updated succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error updating subtask', error });
     }
@@ -202,6 +215,12 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         return;
     }
     const { status } = req.body;
+
+    if (!status || !validStatus.includes(status)) {
+        res.status(400).json({ message: 'Invalid Status' });
+        return;
+    }
+
     try {
         const subtask = await Subtask.findById(subtaskId);
         if (!subtask) {
@@ -259,7 +278,7 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
                 });
             });
 
-        res.json(subtask);
+        res.json({ subtask, message: 'Subtask status updated!' });
     } catch (error) {
         res.status(500).json({ message: 'Error updating subtask status', error });
     }
@@ -267,7 +286,8 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
 
 export const addCommentToSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const userId = req.user?.id; // ID of the user adding the comment
+    const userId = req.user?.id;
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
@@ -275,6 +295,11 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         return;
     }
     const { text } = req.body;
+
+    if (!text) {
+        res.status(400).json({ message: 'Invalid Comment' });
+        return;
+    }
 
     try {
         const subtask = await Subtask.findById(subtaskId);
@@ -293,7 +318,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
             if (task.creator.toString() !== userId) {
                 createNotification({
                     userId: task.creator,
-                    message: `A new comment has been added to the subtask ${subtask.title} of your task ${task.title}: ${text}`,
+                    message: `${username} commented to your subtask ${subtask.title} of your task ${task.title}: ${text}`,
                     taskId: task._id as Types.ObjectId,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
@@ -303,7 +328,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
             if (subtask.creator.toString() !== userId) {
                 createNotification({
                     userId: subtask.creator,
-                    message: `A new comment has been added to your subtask ${subtask.title}: ${text}`,
+                    message: `${username} commented to your subtask ${subtask.title}: ${text} of the task ${task.title}: ${text}`,
                     taskId: task._id as Types.ObjectId,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
@@ -323,7 +348,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
                 });
         }
 
-        res.json(subtask);
+        res.json({ subtask, comment, message: 'Comment added!' });
     } catch (error) {
         res.status(500).json({ message: 'Error adding comment to subtask', error });
     }
@@ -387,7 +412,7 @@ export const deleteSubtask = async (req: Request, res: Response) => {
         }
 
         await subtask.deleteOne();
-        res.status(200).json({ message: 'Subtask deleted successfully' });
+        res.status(200).json({ deleteSubtaskId: subtask._id, message: 'Subtask deleted successfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error deleting subtask', error });
     }
@@ -418,7 +443,7 @@ export const getAllSubtasksForTask = async (req: Request, res: Response) => {
     const filters: any = { taskId };
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status)) filters.status = status;
+    if (status && validStatus.includes(status)) filters.status = status;
 
     // Validate and set `priority`
     if (priority && validPriorities.includes(priority)) filters.priority = priority;
@@ -430,7 +455,7 @@ export const getAllSubtasksForTask = async (req: Request, res: Response) => {
             .limit(pageLimit);
 
         const totalSubtasks = await Subtask.countDocuments(filters);
-        res.status(200).json({ subtasks, totalSubtasks, page: Number(page), totalPages: Math.ceil(totalSubtasks / pageLimit) });
+        res.status(200).json({ subtasks, totalSubtasks, page: Number(page), totalPages: Math.ceil(totalSubtasks / pageLimit), message: 'Subtak fetched succesfully!' });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching subtasks', error });
     }
@@ -460,7 +485,7 @@ export const getMySubtasksForTask = async (req: Request, res: Response) => {
     };
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status)) filters.status = status;
+    if (status && validStatus.includes(status)) filters.status = status;
 
     // Validate and set `priority`
     if (priority && validPriorities.includes(priority)) filters.priority = priority;
@@ -502,7 +527,7 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
     };
 
     // Validate and set `status`
-    if (status && validStatuses.includes(status)) filters.status = status;
+    if (status && validStatus.includes(status)) filters.status = status;
 
     // Validate and set `priority`
     if (priority && validPriorities.includes(priority)) filters.priority = priority;

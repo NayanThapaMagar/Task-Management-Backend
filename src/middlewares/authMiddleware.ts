@@ -26,7 +26,7 @@ export const authenticateUser = async (req: Request, res: Response, next: NextFu
         }
 
         // Attach user to the request object for further use in controllers
-        req.user = { id: user._id.toString()};
+        req.user = { id: user._id.toString(), username: user.username };
         // req.user = { id: user._id.toString(), role: user.role };
 
         next();
