@@ -1,20 +1,30 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { ITask } from './taskModel';
 
 interface Comment {
+    // _id: Types.ObjectId;
     userId: Types.ObjectId;
     text: string;
     createdAt: Date;
+    updatedAt: Date;
 }
+
+const commentSchema = new Schema<Comment>({
+    userId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: 'User' },
+    text: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+});
 
 export interface ISubtask extends Document {
     title: string;
     description: string;
     status: 'to do' | 'pending' | 'completed';
     priority: 'low' | 'medium' | 'high';
-    creator: Types.ObjectId; 
+    creator: Types.ObjectId;
     assignedTo: Types.ObjectId[];
-    comments: Comment[];
-    taskId: Types.ObjectId;
+    comments: Types.DocumentArray<Comment>;
+    taskId: Types.ObjectId | ITask;
 }
 
 const subtaskSchema = new Schema<ISubtask>(
@@ -22,17 +32,11 @@ const subtaskSchema = new Schema<ISubtask>(
         title: { type: String, required: true },
         description: { type: String, required: true },
         status: { type: String, enum: ['to do', 'pending', 'completed'], default: 'to do' },
-        priority: { type: String, enum: ['low', 'medium', 'high'], default: 'low' }, 
+        priority: { type: String, enum: ['low', 'medium', 'high'], default: 'low' },
         creator: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         assignedTo: [{ type: Schema.Types.ObjectId, ref: 'User' }],
-        comments: [
-            {
-                userId: { type: Schema.Types.ObjectId, ref: 'User' },
-                text: { type: String, required: true },
-                createdAt: { type: Date, default: Date.now },
-            },
-        ],
-        taskId: { type: Schema.Types.ObjectId, ref: 'Task', required: true },  // Link to the parent task
+        comments: [commentSchema],
+        taskId: { type: Schema.Types.ObjectId, ref: 'Task', required: true },
     },
     { timestamps: true }
 );

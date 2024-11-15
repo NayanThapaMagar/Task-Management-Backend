@@ -130,7 +130,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
 
         // If no new updates, skip the update process
         if (Object.keys(updates).length === 0) {
-            res.status(200).json({ message: 'No changes detected, subtask not updated' });
+            res.status(200).json({ updatedSubtask: existingSubtask, message: 'No changes detected, subtask not updated' });
             return;
         }
 
@@ -307,7 +307,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
             res.status(404).json({ message: 'Subtask not found' });
             return;
         }
-        const comment = { userId: new Types.ObjectId(userId), text, createdAt: new Date() };
+        const comment = { userId: new Types.ObjectId(userId), text, createdAt: new Date(), updatedAt: new Date() };
         subtask.comments.push(comment);
         await subtask.save();
 
@@ -354,10 +354,95 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
     }
 };
 
+// edit subtask commnet
+export const editSubtaskComment = async (req: Request, res: Response) => {
+    const { subtaskId, commentId } = req.params;
+    const userId = req.user?.id;
+    const { text } = req.body;
+
+    if (!text || !Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId);
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        const comment = subtask.comments.id(commentId);
+        if (!comment) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        if (comment.userId.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to edit this comment' });
+            return;
+        }
+
+        comment.text = text;
+        comment.updatedAt = new Date();
+        await subtask.save();
+
+        res.json({ subtask, comment, message: 'Comment updated successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error editing comment', error });
+    }
+};
+
+// Delete subtaskComment
+export const deleteSubtaskComment = async (req: Request, res: Response) => {
+    const { subtaskId, commentId } = req.params;
+    const userId = req.user?.id;
+
+    if (!Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId).populate({
+            path: 'taskId',
+            select: 'creator title',
+        });
+
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        const commentIndex = subtask.comments.findIndex(
+            (comment) => comment._id.toString() === commentId
+        );
+
+        if (commentIndex === -1) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        const task = subtask.taskId as ITask;
+        if (subtask.comments[commentIndex].userId.toString() !== userId && subtask.creator.toString() !== userId && task.creator.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to delete this comment' });
+            return;
+        }
+
+        subtask.comments.splice(commentIndex, 1);
+        await subtask.save();
+
+        res.json({ message: 'Comment deleted successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting comment', error });
+    }
+};
+
+
 // Delete Subtask
 export const deleteSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
-    const userId = req.user?.id; // ID of the user deleting the subtask
+    const userId = req.user?.id;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
 
@@ -522,8 +607,8 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
     }
 
     const filters: any = {
-        assignedTo: userId, // Filter subtasks assigned to the user
-        taskId: taskId // Ensure subtasks belong to the specified task
+        assignedTo: userId,
+        taskId: taskId
     };
 
     // Validate and set `status`
@@ -542,5 +627,32 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
         res.status(200).json({ subtasks, totalSubtasks, page: Number(page), totalPages: Math.ceil(totalSubtasks / pageLimit) });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching assigned subtasks', error });
+    }
+};
+
+
+// comments
+export const getAllCommentsForSubtask = async (req: Request, res: Response) => {
+    const { subtaskId } = req.params;
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
+    if (!isValidObjectId) {
+        res.status(404).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        res.json({ comments: subtask.comments, message: 'Comments fetched successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching comments for subtask', error });
     }
 };

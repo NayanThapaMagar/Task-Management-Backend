@@ -7,8 +7,11 @@ import {
     getSubtasksBySubtaskId,
     updateSubtask,
     updateSubtaskStatus,
+    deleteSubtask,
     addCommentToSubtask,
-    deleteSubtask
+    getAllCommentsForSubtask,
+    editSubtaskComment,
+    deleteSubtaskComment,
 } from '../controllers/subtaskController';
 import { isTaskAdminOrAssignee, isTaskAdminOrSubtaskAdmin, isTaskAdminOrSubtaskAdminOrSubtaskAssignee } from '../middlewares/roleMiddleware';
 import { authenticateUser } from '../middlewares/authMiddleware';
@@ -27,6 +30,10 @@ router.put('/:taskId/:subtaskId', authenticateUser, isTaskAdminOrSubtaskAdmin, u
 router.delete('/:taskId/:subtaskId', authenticateUser, isTaskAdminOrSubtaskAdmin, deleteSubtask);
 
 router.patch('/:taskId/:subtaskId/status', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, updateSubtaskStatus);
+
+router.get('/:taskId/:subtaskId/comments', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, getAllCommentsForSubtask);
 router.post('/:taskId/:subtaskId/comments', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, addCommentToSubtask);
+router.put('/:taskId/:subtaskId/comments/:commentId', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, editSubtaskComment);
+router.delete('/:taskId/:subtaskId/comments/:commentId', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, deleteSubtaskComment);
 
 export default router;

@@ -5,8 +5,6 @@ import { createNotification } from '../utils/notifications';
 import { arraysEqual } from '../utils/arrayUtils';
 import { Types } from 'mongoose';
 
-
-
 const validStatus = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 // Admin: Create a Task
