@@ -1,13 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
-import { ITask } from './taskModel';
-
-interface Comment {
-    // _id: Types.ObjectId;
-    userId: Types.ObjectId;
-    text: string;
-    createdAt: Date;
-    updatedAt: Date;
-}
+import { ITask, Comment } from './taskModel';
 
 const commentSchema = new Schema<Comment>({
     userId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: 'User' },

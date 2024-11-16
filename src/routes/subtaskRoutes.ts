@@ -24,13 +24,14 @@ router.get('/:taskId/my-subtasks', authenticateUser, isTaskAdminOrAssignee, getM
 router.get('/:taskId/assigned-subtasks', authenticateUser, isTaskAdminOrAssignee, getAssignedSubtasksForTask);
 router.get('/:taskId/:subtaskId', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, getSubtasksBySubtaskId);
 
-// Create a new subtask
+// subtask
 router.post('/:taskId', authenticateUser, isTaskAdminOrAssignee, createSubtask);
 router.put('/:taskId/:subtaskId', authenticateUser, isTaskAdminOrSubtaskAdmin, updateSubtask);
 router.delete('/:taskId/:subtaskId', authenticateUser, isTaskAdminOrSubtaskAdmin, deleteSubtask);
 
 router.patch('/:taskId/:subtaskId/status', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, updateSubtaskStatus);
 
+// subtask commnets
 router.get('/:taskId/:subtaskId/comments', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, getAllCommentsForSubtask);
 router.post('/:taskId/:subtaskId/comments', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, addCommentToSubtask);
 router.put('/:taskId/:subtaskId/comments/:commentId', authenticateUser, isTaskAdminOrSubtaskAdminOrSubtaskAssignee, editSubtaskComment);

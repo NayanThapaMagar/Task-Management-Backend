@@ -7,8 +7,11 @@ import {
     createTask,
     updateTask,
     updateTaskStatus,
-    addComment,
-    deleteTask
+    deleteTask,
+    getAllCommentsForTask,
+    addCommentToTask,
+    editTaskComment,
+    deleteTaskComment,
 } from '../controllers/taskController';
 import { isTaskAdmin, isTaskAdminOrAssignee } from '../middlewares/roleMiddleware';
 import { authenticateUser } from '../middlewares/authMiddleware';
@@ -26,6 +29,11 @@ router.put('/:taskId', authenticateUser, isTaskAdmin, updateTask);
 router.delete('/:taskId', authenticateUser, isTaskAdmin, deleteTask);
 
 router.patch('/:taskId/status', authenticateUser, isTaskAdminOrAssignee, updateTaskStatus);
-router.post('/:taskId/comments', authenticateUser, isTaskAdminOrAssignee, addComment);
+
+// task comments
+router.get('/:taskId/comments', authenticateUser, isTaskAdminOrAssignee, getAllCommentsForTask);
+router.post('/:taskId/comments', authenticateUser, isTaskAdminOrAssignee, addCommentToTask);
+router.put('/:taskId/comments/:commentId', authenticateUser, isTaskAdminOrAssignee, editTaskComment);
+router.delete('/:taskId/comments/:commentId', authenticateUser, isTaskAdminOrAssignee, deleteTaskComment);
 
 export default router;

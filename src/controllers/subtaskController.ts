@@ -284,161 +284,6 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
     }
 };
 
-export const addCommentToSubtask = async (req: Request, res: Response) => {
-    const { subtaskId } = req.params;
-    const userId = req.user?.id;
-    const username = req.user?.username;
-
-    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
-    if (!isValidObjectId) {
-        res.status(404).json({ message: 'Invalid Request' });
-        return;
-    }
-    const { text } = req.body;
-
-    if (!text) {
-        res.status(400).json({ message: 'Invalid Comment' });
-        return;
-    }
-
-    try {
-        const subtask = await Subtask.findById(subtaskId);
-        if (!subtask) {
-            res.status(404).json({ message: 'Subtask not found' });
-            return;
-        }
-        const comment = { userId: new Types.ObjectId(userId), text, createdAt: new Date(), updatedAt: new Date() };
-        subtask.comments.push(comment);
-        await subtask.save();
-
-        // Get the parent task
-        const task = await Task.findById(subtask.taskId);
-        if (task) {
-            // Notify the task creator (admin)
-            if (task.creator.toString() !== userId) {
-                createNotification({
-                    userId: task.creator,
-                    message: `${username} commented to your subtask ${subtask.title} of your task ${task.title}: ${text}`,
-                    taskId: task._id as Types.ObjectId,
-                    subtaskId: subtask._id as Types.ObjectId,
-                });
-            }
-
-            // Notify the subtask creator (admin)
-            if (subtask.creator.toString() !== userId) {
-                createNotification({
-                    userId: subtask.creator,
-                    message: `${username} commented to your subtask ${subtask.title}: ${text} of the task ${task.title}: ${text}`,
-                    taskId: task._id as Types.ObjectId,
-                    subtaskId: subtask._id as Types.ObjectId,
-                });
-            }
-
-            // Notify the subtask assignees
-            const assignedTo = subtask.assignedTo || [];
-            assignedTo
-                .filter((assignedUserId: Types.ObjectId) => assignedUserId.toString() !== userId)
-                .forEach((assignedUserId: Types.ObjectId) => {
-                    createNotification({
-                        userId: assignedUserId,
-                        message: `A new comment has been added to the subtask ${subtask.title}: ${text}`,
-                        taskId: task._id as Types.ObjectId,
-                        subtaskId: subtask._id as Types.ObjectId,
-                    });
-                });
-        }
-
-        res.json({ subtask, comment, message: 'Comment added!' });
-    } catch (error) {
-        res.status(500).json({ message: 'Error adding comment to subtask', error });
-    }
-};
-
-// edit subtask commnet
-export const editSubtaskComment = async (req: Request, res: Response) => {
-    const { subtaskId, commentId } = req.params;
-    const userId = req.user?.id;
-    const { text } = req.body;
-
-    if (!text || !Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
-        res.status(400).json({ message: 'Invalid Request' });
-        return;
-    }
-
-    try {
-        const subtask = await Subtask.findById(subtaskId);
-        if (!subtask) {
-            res.status(404).json({ message: 'Subtask not found' });
-            return;
-        }
-
-        const comment = subtask.comments.id(commentId);
-        if (!comment) {
-            res.status(404).json({ message: 'Comment not found' });
-            return;
-        }
-
-        if (comment.userId.toString() !== userId) {
-            res.status(403).json({ message: 'You are not authorized to edit this comment' });
-            return;
-        }
-
-        comment.text = text;
-        comment.updatedAt = new Date();
-        await subtask.save();
-
-        res.json({ subtask, comment, message: 'Comment updated successfully!' });
-    } catch (error) {
-        res.status(500).json({ message: 'Error editing comment', error });
-    }
-};
-
-// Delete subtaskComment
-export const deleteSubtaskComment = async (req: Request, res: Response) => {
-    const { subtaskId, commentId } = req.params;
-    const userId = req.user?.id;
-
-    if (!Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
-        res.status(400).json({ message: 'Invalid Request' });
-        return;
-    }
-
-    try {
-        const subtask = await Subtask.findById(subtaskId).populate({
-            path: 'taskId',
-            select: 'creator title',
-        });
-
-        if (!subtask) {
-            res.status(404).json({ message: 'Subtask not found' });
-            return;
-        }
-
-        const commentIndex = subtask.comments.findIndex(
-            (comment) => comment._id.toString() === commentId
-        );
-
-        if (commentIndex === -1) {
-            res.status(404).json({ message: 'Comment not found' });
-            return;
-        }
-
-        const task = subtask.taskId as ITask;
-        if (subtask.comments[commentIndex].userId.toString() !== userId && subtask.creator.toString() !== userId && task.creator.toString() !== userId) {
-            res.status(403).json({ message: 'You are not authorized to delete this comment' });
-            return;
-        }
-
-        subtask.comments.splice(commentIndex, 1);
-        await subtask.save();
-
-        res.json({ message: 'Comment deleted successfully!' });
-    } catch (error) {
-        res.status(500).json({ message: 'Error deleting comment', error });
-    }
-};
-
-
 // Delete Subtask
 export const deleteSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
@@ -502,6 +347,7 @@ export const deleteSubtask = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error deleting subtask', error });
     }
 };
+
 
 // Helper function for pagination
 const getPagination = (page: number, limit: number) => {
@@ -632,6 +478,184 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
 
 
 // comments
+
+export const addCommentToSubtask = async (req: Request, res: Response) => {
+    const { subtaskId } = req.params;
+    const userId = req.user?.id;
+    const username = req.user?.username;
+
+    const isValidObjectId = Types.ObjectId.isValid(subtaskId);
+    if (!isValidObjectId) {
+        res.status(404).json({ message: 'Invalid Request' });
+        return;
+    }
+    const { text } = req.body;
+
+    if (!text) {
+        res.status(400).json({ message: 'Invalid Comment' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId);
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        const comment = subtask.comments.create({
+            userId: new Types.ObjectId(userId),
+            text,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        });
+        subtask.comments.push(comment);
+        await subtask.save();
+
+        // Get the parent task
+        const task = await Task.findById(subtask.taskId);
+        if (task) {
+            // Notify the task creator (admin)
+            if (task.creator.toString() !== userId) {
+                createNotification({
+                    userId: task.creator,
+                    message: `${username} commented to your subtask ${subtask.title} of your task ${task.title}: ${text}`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask creator (admin)
+            if (subtask.creator.toString() !== userId) {
+                createNotification({
+                    userId: subtask.creator,
+                    message: `${username} commented to your subtask ${subtask.title}: ${text} of the task ${task.title}: ${text}`,
+                    taskId: task._id as Types.ObjectId,
+                    subtaskId: subtask._id as Types.ObjectId,
+                });
+            }
+
+            // Notify the subtask assignees
+            const assignedTo = subtask.assignedTo || [];
+            assignedTo
+                .filter((assignedUserId: Types.ObjectId) => assignedUserId.toString() !== userId)
+                .forEach((assignedUserId: Types.ObjectId) => {
+                    createNotification({
+                        userId: assignedUserId,
+                        message: `A new comment has been added to the subtask ${subtask.title}: ${text}`,
+                        taskId: task._id as Types.ObjectId,
+                        subtaskId: subtask._id as Types.ObjectId,
+                    });
+                });
+        }
+
+        const populatedSubtask = await Subtask.findById(subtask._id).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+
+        if (!populatedSubtask) {
+            res.status(500).json({ message: 'Failed to fetch comment after comment add!' });
+            return;
+        }
+
+        const pupulatedComment = populatedSubtask.comments.id(comment._id);
+
+        res.json({ comment: pupulatedComment, message: 'Comment added!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding comment to subtask', error });
+    }
+};
+
+// edit subtask commnet
+export const editSubtaskComment = async (req: Request, res: Response) => {
+    const { subtaskId, commentId } = req.params;
+    const userId = req.user?.id;
+    const { text } = req.body;
+
+    if (!text || !Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        const comment = subtask.comments.id(commentId);
+        if (!comment) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        if (comment.userId._id.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to edit this comment' });
+            return;
+        }
+
+        comment.text = text;
+        comment.updatedAt = new Date();
+        await subtask.save();
+
+        res.json({ editedComment: subtask.comments.id(commentId), message: 'Comment edited successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error editing comment!', error });
+    }
+};
+
+// Delete subtaskComment
+export const deleteSubtaskComment = async (req: Request, res: Response) => {
+    const { subtaskId, commentId } = req.params;
+    const userId = req.user?.id;
+
+    if (!Types.ObjectId.isValid(subtaskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const subtask = await Subtask.findById(subtaskId).populate({
+            path: 'taskId',
+            select: 'creator',
+        });
+
+        if (!subtask) {
+            res.status(404).json({ message: 'Subtask not found' });
+            return;
+        }
+
+        const commentIndex = subtask.comments.findIndex(
+            (comment) => comment._id.toString() === commentId
+        );
+
+        if (commentIndex === -1) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        const task = subtask.taskId as ITask;
+        if (subtask.comments[commentIndex].userId.toString() !== userId && subtask.creator.toString() !== userId && task.creator.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to delete this comment' });
+            return;
+        }
+
+        subtask.comments.splice(commentIndex, 1);
+        await subtask.save();
+
+        res.json({ deletedCommentId: commentId, message: 'Comment deleted successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting comment', error });
+    }
+};
+
+// get all subtask comments
 export const getAllCommentsForSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
 

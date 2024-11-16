@@ -220,62 +220,6 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
     }
 };
 
-// Assignee: Add Comment to Task
-export const addComment = async (req: Request, res: Response) => {
-    const { taskId } = req.params;
-    const userId = req.user?.id;
-    const username = req.user?.username;
-
-    const isValidObjectId = Types.ObjectId.isValid(taskId);
-    if (!isValidObjectId) {
-        res.status(404).json({ message: 'Invalid Request' });
-        return;
-    }
-    const { text } = req.body;
-
-    if (!text) {
-        res.status(400).json({ message: 'Invalid Comment' });
-        return;
-    }
-
-    try {
-        const task = await Task.findById(taskId);
-        if (!task) {
-            res.status(404).json({ message: 'Task not found' });
-            return;
-        }
-
-        const comment = { userId: new Types.ObjectId(userId), text, createdAt: new Date() };
-        task.comments.push(comment);
-        await task.save();
-
-        // Notify the creator if they are not the one adding the comment
-        if (task.creator.toString() !== userId) {
-            createNotification({
-                userId: task.creator,
-                message: `${username} commented to your task ${task.title}: ${text}`,
-                taskId: task._id as Types.ObjectId,
-            });
-        }
-
-        // Notify assigned users, excluding the one adding the comment
-        const assignedTo = task.assignedTo || [];
-        assignedTo.forEach((assignedUserId: Types.ObjectId) => {
-            if (assignedUserId.toString() !== userId) {
-                createNotification({
-                    userId: assignedUserId,
-                    message: `${username} commented to your task ${task.title}: ${text}`,
-                    taskId: task._id as Types.ObjectId,
-                });
-            }
-        });
-
-        res.json({ task, comment, message: 'Comment added!' });
-    } catch (error) {
-        res.status(500).json({ message: 'Error adding comment', error });
-    }
-};
-
 // Delete Task and its associated Subtasks
 export const deleteTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
@@ -431,5 +375,189 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
         res.status(200).json({ tasks, totalTasks, page: Number(page), totalPages: Math.ceil(totalTasks / pageLimit) });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching assigned tasks', error });
+    }
+};
+
+
+// Add Comment to Task
+export const addCommentToTask = async (req: Request, res: Response) => {
+    const { taskId } = req.params;
+    const userId = req.user?.id;
+    const username = req.user?.username;
+
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
+    if (!isValidObjectId) {
+        res.status(404).json({ message: 'Invalid Request' });
+        return;
+    }
+    const { text } = req.body;
+
+    if (!text) {
+        res.status(400).json({ message: 'Invalid Comment' });
+        return;
+    }
+
+    try {
+        const task = await Task.findById(taskId);
+        if (!task) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        const comment = task.comments.create({
+            userId: new Types.ObjectId(userId),
+            text,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        });
+        task.comments.push(comment);
+        await task.save();
+
+        // Notify the creator if they are not the one adding the comment
+        if (task.creator.toString() !== userId) {
+            createNotification({
+                userId: task.creator,
+                message: `${username} commented to your task ${task.title}: ${text}`,
+                taskId: task._id as Types.ObjectId,
+            });
+        }
+
+        // Notify assigned users, excluding the one adding the comment
+        const assignedTo = task.assignedTo || [];
+        assignedTo.forEach((assignedUserId: Types.ObjectId) => {
+            if (assignedUserId.toString() !== userId) {
+                createNotification({
+                    userId: assignedUserId,
+                    message: `${username} commented to your task ${task.title}: ${text}`,
+                    taskId: task._id as Types.ObjectId,
+                });
+            }
+        });
+
+        const populatedTask = await Task.findById(task._id).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+
+        if (!populatedTask) {
+            res.status(500).json({ message: 'Failed to fetch comment after comment add!' });
+            return;
+        }
+
+        const pupulatedComment = populatedTask.comments.id(comment._id);
+
+        res.json({ comment: pupulatedComment, message: 'Comment added!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding comment', error });
+    }
+};
+
+// edit task commnet
+export const editTaskComment = async (req: Request, res: Response) => {
+    const { taskId, commentId } = req.params;
+    const userId = req.user?.id;
+    const { text } = req.body;
+
+    if (!text || !Types.ObjectId.isValid(taskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const task = await Task.findById(taskId).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+
+        if (!task) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        const comment = task.comments.id(commentId);
+        if (!comment) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        if (comment.userId._id.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to edit this comment' });
+            return;
+        }
+
+        comment.text = text;
+        comment.updatedAt = new Date();
+        await task.save();
+
+        res.json({ editedComment: task.comments.id(commentId), message: 'Comment edited successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error editing comment!', error });
+    }
+};
+
+// Delete task Comment
+export const deleteTaskComment = async (req: Request, res: Response) => {
+    const { taskId, commentId } = req.params;
+    const userId = req.user?.id;
+
+    if (!Types.ObjectId.isValid(taskId) || !Types.ObjectId.isValid(commentId)) {
+        res.status(400).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const task = await Task.findById(taskId);
+
+        if (!task) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        const commentIndex = task.comments.findIndex(
+            (comment) => comment._id.toString() === commentId
+        );
+
+        if (commentIndex === -1) {
+            res.status(404).json({ message: 'Comment not found' });
+            return;
+        }
+
+        if (task.comments[commentIndex].userId.toString() !== userId && task.creator.toString() !== userId) {
+            res.status(403).json({ message: 'You are not authorized to delete this comment' });
+            return;
+        }
+
+        task.comments.splice(commentIndex, 1);
+        await task.save();
+
+        res.json({ deletedCommentId: commentId, message: 'Comment deleted successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting comment', error });
+    }
+};
+
+// get all task comments
+export const getAllCommentsForTask = async (req: Request, res: Response) => {
+    const { taskId } = req.params;
+
+    const isValidObjectId = Types.ObjectId.isValid(taskId);
+    if (!isValidObjectId) {
+        res.status(404).json({ message: 'Invalid Request' });
+        return;
+    }
+
+    try {
+        const task = await Task.findById(taskId).populate({
+            path: 'comments.userId',
+            select: 'username email',
+        });
+        if (!task) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        res.json({ comments: task.comments, message: 'Comments fetched successfully!' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching comments for task', error });
     }
 };
