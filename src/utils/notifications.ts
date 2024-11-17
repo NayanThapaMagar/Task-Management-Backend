@@ -1,31 +1,39 @@
 import Notification from '../models/notificationModel';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { io } from '../server'; // Import Socket.IO instance
 
 // Helper function to create notifications
 export const createNotification = async ({
-    userId,
+    session,
+    originatorId,
+    recipientId,
     message,
     taskId,
     subtaskId,
 }: {
-    userId: Types.ObjectId;
+    session: mongoose.mongo.ClientSession;
+    originatorId: Types.ObjectId;
+    recipientId: Types.ObjectId;
     message: string;
     taskId?: Types.ObjectId;
     subtaskId?: Types.ObjectId;
 }) => {
     try {
         const notification = new Notification({
-            userId,
+            originatorId,
+            recipientId,
             message,
             taskId,
             subtaskId,
         });
-        await notification.save();
+        await notification.save({ session });
 
         // Emit the notification to the specific user via Socket.IO
-        io.to(userId.toString()).emit('newNotification', notification);
+        io.to(recipientId.toString()).emit('newNotification', notification);
+
+        return { success: true };
     } catch (error) {
         console.error('Error creating notification:', error);
+        return { success: false, error: 'Failed to create notification' };
     }
 };

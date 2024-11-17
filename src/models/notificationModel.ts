@@ -2,7 +2,8 @@ import mongoose, { Schema, Document, Types } from 'mongoose';
 
 // Define the interface for the notification document
 interface INotification extends Document {
-  userId: Types.ObjectId;
+  originatorId: Types.ObjectId;
+  recipientId: Types.ObjectId;
   message: string;
   taskId?: Types.ObjectId;
   subtaskId?: Types.ObjectId;
@@ -13,7 +14,8 @@ interface INotification extends Document {
 // Define the schema for notifications
 const NotificationSchema = new Schema<INotification>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    originatorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    recipientId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     message: { type: String, required: true },
     taskId: { type: Schema.Types.ObjectId, ref: 'Task' },
     subtaskId: { type: Schema.Types.ObjectId, ref: 'Subtask' },

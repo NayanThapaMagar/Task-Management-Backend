@@ -1,15 +1,18 @@
 import { Request, Response } from 'express';
-import Task from '../models/taskModel';
+import Task, { ITask } from '../models/taskModel';
 import Subtask from '../models/subtaskModel';
 import { createNotification } from '../utils/notifications';
 import { arraysEqual } from '../utils/arrayUtils';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 
 const validStatus = ['to do', 'pending', 'completed'];
 const validPriorities = ['low', 'medium', 'high'];
 // Admin: Create a Task
 export const createTask = async (req: Request, res: Response) => {
+    const requestingUserId = new Types.ObjectId(req.user?.id);
+    const session = await mongoose.startSession();
     try {
+        session.startTransaction();
         const { title, description, priority, assignedTo } = req.body;
 
         if (!title) {
@@ -30,22 +33,35 @@ export const createTask = async (req: Request, res: Response) => {
             description,
             priority,
             creator: req.user?.id,
-            assignedTo: assignedUsers.length > 0 ? assignedUsers : undefined, // Set to undefined if empty
-        });
+            assignedTo: assignedUsers.length > 0 ? assignedUsers : undefined,
+        }, { session }) as unknown as ITask;
 
         // Create notifications for all assigned users if there are any
         if (assignedUsers.length > 0) {
-            assignedUsers.forEach(userId => {
-                createNotification({
-                    userId,
+
+            for (const userId of assignedUsers) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
                     message: `You have been assigned to the task: ${task.title}`,
                     taskId: task._id as Types.ObjectId,
                 });
-            });
+
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            };
+
         }
 
+        await session.commitTransaction();
+        session.endSession();
         res.status(201).json({ task, message: 'Task added succesfully!' });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         res.status(500).json({ message: 'Error creating task', error });
     }
 };
@@ -75,6 +91,8 @@ export const getTaskById = async (req: Request, res: Response) => {
 // Admin: Update Task Details
 export const updateTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
+
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
         res.status(404).json({ message: 'Invalid Request' });
@@ -93,13 +111,27 @@ export const updateTask = async (req: Request, res: Response) => {
         return
     }
 
+    const session = await mongoose.startSession();
+
     try {
+        session.startTransaction();
+
         // Fetch the existing task
         const existingTask = await Task.findById(taskId);
         if (!existingTask) {
             res.status(404).json({ message: 'Task not found' });
             return;
         }
+
+        const allAssignedUsers = (assignedTo as string[] || []).map(user => new Types.ObjectId(user));
+        const previousAssignedUsers = existingTask.assignedTo || [];
+
+        const addedUsers = allAssignedUsers.filter(user =>
+            !previousAssignedUsers.some(existingUser => existingUser.equals(user))
+        );
+        const removedUsers = previousAssignedUsers.filter(user =>
+            !allAssignedUsers.some(newUser => newUser.equals(user))
+        );
 
         // Compare new values with existing values
         const updates: any = {};
@@ -119,7 +151,7 @@ export const updateTask = async (req: Request, res: Response) => {
         }
 
         // Update the task
-        const updatedTask = await Task.findByIdAndUpdate(taskId, updates, { new: true, runValidators: true });
+        const updatedTask = await Task.findByIdAndUpdate(taskId, updates, { session, new: true, runValidators: true });
 
         // Check if the updatedTask is null
         if (!updatedTask) {
@@ -127,43 +159,67 @@ export const updateTask = async (req: Request, res: Response) => {
             return;
         }
 
+        // Update Subtasks: filter removed users from assignedTo
+        const updatedSubtask = await Subtask.updateMany(
+            { taskId },
+            { $pull: { assignedTo: { $in: removedUsers } } },
+            { session, new: true, runValidators: true }
+        );
+
+        if (!updatedSubtask) {
+            res.status(404).json({ message: 'Subtask not found filtering removed users' });
+            return;
+        }
         // Check for assigned users
         if (assignedTo !== undefined) {
-            const previousAssignedUsers = existingTask.assignedTo || [];
-            const newAssignedUsers = assignedTo || [];
-
-            // Determine newly assigned users
-            const addedUsers = newAssignedUsers.filter((user: Types.ObjectId) => !previousAssignedUsers.includes(user));
-            const removedUsers = previousAssignedUsers.filter(user => !newAssignedUsers.includes(user));
-
             // Create notifications for newly assigned users
-            addedUsers.forEach((userId: Types.ObjectId) => {
-                createNotification({
-                    userId,
+            for (const userId of addedUsers) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
                     message: `You have been assigned to the task: ${updatedTask.title}`,
                     taskId: updatedTask._id as Types.ObjectId,
                 });
-            });
 
-            removedUsers.forEach(userId => {
-                createNotification({
-                    userId,
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            };
+
+            for (const userId of removedUsers) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
                     message: `You have been removed form the task: ${updatedTask.title}`,
                     taskId: updatedTask._id as Types.ObjectId,
                 });
-            });
+
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            };
         }
 
+        await session.commitTransaction();
+        session.endSession();
         res.status(200).json({ updatedTask, message: 'Task updated succesfully!' });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating task', error });
+        await session.abortTransaction();
+        session.endSession();
+        res.status(500).json({ message: 'Error updating task!', error });
+        console.log(error);
+
     }
 };
 
 // Assignee: Update Task Status
 export const updateTaskStatus = async (req: Request, res: Response) => {
     const { taskId } = req.params;
-    const userId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
@@ -177,7 +233,11 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         return;
     }
 
+    const session = await mongoose.startSession();
+
     try {
+        session.startTransaction();
+
         const task = await Task.findById(taskId);
         if (!task) {
             res.status(404).json({ message: 'Task not found' });
@@ -192,30 +252,49 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 
         // Update the task status
         task.status = status;
-        await task.save({ validateBeforeSave: true });
+        await task.save({ session, validateBeforeSave: true });
 
         // Notify the creator if they are not the one making the change
-        if (task.creator.toString() !== userId) {
-            createNotification({
-                userId: task.creator,
+        if (task.creator !== requestingUserId) {
+            const result = await createNotification({
+                session,
+                originatorId: requestingUserId,
+                recipientId: task.creator,
                 message: `The status of task ${task.title} has been updated to ${status}.`,
                 taskId: task._id as Types.ObjectId,
             });
+
+            if (!result.success) {
+                res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                return;
+            }
         }
 
         // Notify assigned users, excluding the one making the change
-        const assignedTo = task.assignedTo || [];
-        assignedTo.forEach((assignedUserId: Types.ObjectId) => {
-            if (assignedUserId.toString() !== userId) {
-                createNotification({
-                    userId: assignedUserId,
+        const assignedTo = task.assignedTo;
+        for (const userId of assignedTo) {
+            if (userId !== requestingUserId) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
                     message: `The status of task ${task.title} has been updated to ${status}.`,
                     taskId: task._id as Types.ObjectId,
                 });
+
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
             }
-        });
+        };
+
+        await session.commitTransaction();
+        session.endSession()
         res.json({ task, message: 'Task status updated!' });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         res.status(500).json({ message: 'Error updating task status!', error });
     }
 };
@@ -223,6 +302,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 // Delete Task and its associated Subtasks
 export const deleteTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
 
@@ -231,7 +311,9 @@ export const deleteTask = async (req: Request, res: Response) => {
         return;
     }
 
+    const session = await mongoose.startSession();
     try {
+        session.startTransaction();
         // Find the task
         const task = await Task.findById(taskId);
 
@@ -244,23 +326,34 @@ export const deleteTask = async (req: Request, res: Response) => {
 
         // Check for assigned users
         if (assignedTo && assignedTo.length > 0) {
-            assignedTo.forEach((assignedUserId: Types.ObjectId) => {
-                createNotification({
-                    userId: assignedUserId,
-                    message: `Your task ${task.title} has been deleted.`,
+            for (const userId of assignedTo) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
+                    message: `The task ${task.title} has been deleted.`,
                     taskId: task._id as Types.ObjectId,
                 });
-            });
+
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            };
         }
 
         // Delete all associated subtasks
-        await Subtask.deleteMany({ taskId: taskId });
+        await Subtask.deleteMany({ taskId: taskId }, { session });
 
         // Delete the task
-        await task.deleteOne();
+        await task.deleteOne({ session });
 
+        await session.commitTransaction();
+        session.endSession()
         res.status(200).json({ deletedTaskId: taskId, message: 'Task deleted successfully!' });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         res.status(500).json({ message: 'Error deleting task', error });
     }
 };
@@ -280,7 +373,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const userId = req.user?.id;
+    const requestingUserId = req.user?.id;
 
     const filters: any = {};
 
@@ -297,8 +390,8 @@ export const getAllTasks = async (req: Request, res: Response) => {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const tasks = await Task.find({
             $or: [
-                { creator: userId },
-                { assignedTo: userId }
+                { creator: requestingUserId },
+                { assignedTo: requestingUserId }
             ],
             ...filters
         })
@@ -320,9 +413,9 @@ export const getMyTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const userId = req.user?.id;
+    const requestingUserId = req.user?.id;
 
-    const filters: any = { creator: userId };
+    const filters: any = { creator: requestingUserId };
 
     // Validate and set `status`
     if (status && validStatus.includes(status))
@@ -353,9 +446,9 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const userId = req.user?.id;
+    const requestingUserId = req.user?.id;
 
-    const filters: any = { assignedTo: userId };
+    const filters: any = { assignedTo: requestingUserId };
 
     // Validate and set `status`
     if (status && validStatus.includes(status))
@@ -382,7 +475,7 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
 // Add Comment to Task
 export const addCommentToTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
-    const userId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
     const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
@@ -397,7 +490,10 @@ export const addCommentToTask = async (req: Request, res: Response) => {
         return;
     }
 
+
+    const session = await mongoose.startSession();
     try {
+        session.startTransaction();
         const task = await Task.findById(taskId);
         if (!task) {
             res.status(404).json({ message: 'Task not found' });
@@ -405,36 +501,51 @@ export const addCommentToTask = async (req: Request, res: Response) => {
         }
 
         const comment = task.comments.create({
-            userId: new Types.ObjectId(userId),
+            userId: requestingUserId,
             text,
             createdAt: new Date(),
             updatedAt: new Date(),
         });
         task.comments.push(comment);
-        await task.save();
+        await task.save({ session });
 
         // Notify the creator if they are not the one adding the comment
-        if (task.creator.toString() !== userId) {
-            createNotification({
-                userId: task.creator,
+        if (task.creator !== requestingUserId) {
+            const result = await createNotification({
+                session,
+                originatorId: requestingUserId,
+                recipientId: task.creator,
                 message: `${username} commented to your task ${task.title}: ${text}`,
                 taskId: task._id as Types.ObjectId,
             });
+
+            if (!result.success) {
+                res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                return;
+            }
         }
 
         // Notify assigned users, excluding the one adding the comment
-        const assignedTo = task.assignedTo || [];
-        assignedTo.forEach((assignedUserId: Types.ObjectId) => {
-            if (assignedUserId.toString() !== userId) {
-                createNotification({
-                    userId: assignedUserId,
+        const assignedTo = task.assignedTo;
+
+        for (const userId of assignedTo) {
+            if (userId !== requestingUserId) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: userId,
                     message: `${username} commented to your task ${task.title}: ${text}`,
                     taskId: task._id as Types.ObjectId,
                 });
-            }
-        });
 
-        const populatedTask = await Task.findById(task._id).populate({
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            }
+        };
+
+        const populatedTask = await Task.findById(task._id, { session }).populate({
             path: 'comments.userId',
             select: 'username email',
         });
@@ -446,8 +557,12 @@ export const addCommentToTask = async (req: Request, res: Response) => {
 
         const pupulatedComment = populatedTask.comments.id(comment._id);
 
+        await session.commitTransaction();
+        session.endSession();
         res.json({ comment: pupulatedComment, message: 'Comment added!' });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         res.status(500).json({ message: 'Error adding comment', error });
     }
 };
@@ -455,7 +570,7 @@ export const addCommentToTask = async (req: Request, res: Response) => {
 // edit task commnet
 export const editTaskComment = async (req: Request, res: Response) => {
     const { taskId, commentId } = req.params;
-    const userId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
     const { text } = req.body;
 
     if (!text || !Types.ObjectId.isValid(taskId) || !Types.ObjectId.isValid(commentId)) {
@@ -480,7 +595,7 @@ export const editTaskComment = async (req: Request, res: Response) => {
             return;
         }
 
-        if (comment.userId._id.toString() !== userId) {
+        if (comment.userId._id !== requestingUserId) {
             res.status(403).json({ message: 'You are not authorized to edit this comment' });
             return;
         }
@@ -498,7 +613,7 @@ export const editTaskComment = async (req: Request, res: Response) => {
 // Delete task Comment
 export const deleteTaskComment = async (req: Request, res: Response) => {
     const { taskId, commentId } = req.params;
-    const userId = req.user?.id;
+    const requestingUserId = req.user?.id;
 
     if (!Types.ObjectId.isValid(taskId) || !Types.ObjectId.isValid(commentId)) {
         res.status(400).json({ message: 'Invalid Request' });
@@ -522,7 +637,7 @@ export const deleteTaskComment = async (req: Request, res: Response) => {
             return;
         }
 
-        if (task.comments[commentIndex].userId.toString() !== userId && task.creator.toString() !== userId) {
+        if (task.comments[commentIndex].userId.toString() !== requestingUserId && task.creator.toString() !== requestingUserId) {
             res.status(403).json({ message: 'You are not authorized to delete this comment' });
             return;
         }
