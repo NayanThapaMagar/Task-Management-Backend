@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import User from '../models/userModel';
-import Subtask, { ISubtask } from '../models/subtaskModel';
+import Subtask from '../models/subtaskModel';
 import Task, { ITask } from '../models/taskModel';
 import { createNotification } from '../utils/notifications'
 import { arraysEqual } from '../utils/arrayUtils';
@@ -12,6 +12,7 @@ const validPriorities = ['low', 'medium', 'high'];
 export const createSubtask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const session = await mongoose.startSession();
     try {
@@ -44,23 +45,24 @@ export const createSubtask = async (req: Request, res: Response) => {
             }
         }
 
-        const subtask = await Subtask.create({
+        const subtask = new Subtask({
             title,
             description,
             priority,
             creator: req.user?.id,
             assignedTo: assignedUsers.length > 0 ? assignedUsers : undefined,
-            taskId, // Reference to the parent task
-        }, { session }) as unknown as ISubtask;
+            taskId,
+        });
+
+        await subtask.save({ session });
 
         // Notify the task admin (if he/she is not the creator)
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `A new subtask ${subtask.title} has been created for your task: ${task.title}.`,
-                taskId: task._id as Types.ObjectId,
+                message: `${username?.toLocaleUpperCase()} created a new subtask ${subtask.title} in ${task.title}.`,
                 subtaskId: subtask._id as Types.ObjectId,
             });
 
@@ -73,12 +75,12 @@ export const createSubtask = async (req: Request, res: Response) => {
         if (assignedUsers.length > 0) {
             // Notify assigned users (excluding the creator)
             for (const userId of assignedUsers) {
-                if (userId !== requestingUserId) {
+                if (!requestingUserId.equals(userId)) {
                     const result = await createNotification({
                         session,
                         originatorId: requestingUserId,
                         recipientId: userId,
-                        message: `You have been assigned to the subtask: ${subtask.title} of task: ${task.title}.`,
+                        message: `${username?.toLocaleUpperCase()} assigned yo to subtask ${subtask.title} of ${task.title}.`,
                         subtaskId: subtask._id as Types.ObjectId,
                     });
 
@@ -124,6 +126,7 @@ export const getSubtasksBySubtaskId = async (req: Request, res: Response) => {
 export const updateSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
@@ -199,12 +202,12 @@ export const updateSubtask = async (req: Request, res: Response) => {
         if (assignedTo !== undefined) {
             // Notify newly assigned users, excluding the updater
             for (const userId of addedUsers) {
-                if (userId !== requestingUserId) {
+                if (!requestingUserId.equals(userId)) {
                     const result = await createNotification({
                         session,
                         originatorId: requestingUserId,
                         recipientId: userId,
-                        message: `You have been assigned to the subtask: ${updatedSubtask.title} of task: ${task.title}.`,
+                        message: `${username?.toLocaleUpperCase()} assigned you to subtask ${updatedSubtask.title} of ${task.title}.`,
                         subtaskId: updatedSubtask._id as Types.ObjectId,
                     });
 
@@ -221,7 +224,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `You have been removed from the subtask: ${updatedSubtask.title} of task: ${task.title}.`,
+                    message: `${username?.toLocaleUpperCase()} removed you from subtask ${updatedSubtask.title} of ${task.title}.`,
                     subtaskId: updatedSubtask._id as Types.ObjectId,
                 });
 
@@ -233,12 +236,12 @@ export const updateSubtask = async (req: Request, res: Response) => {
         }
 
         // Notify task admin if they are not the updater
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `The subtask ${updatedSubtask.title} in your task ${task.title} has been updated.`,
+                message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
                 subtaskId: updatedSubtask._id as Types.ObjectId,
             });
 
@@ -248,12 +251,12 @@ export const updateSubtask = async (req: Request, res: Response) => {
             }
         }
         // Notify the subtask creator (subtask admin) if they didn't update the status
-        if (updatedSubtask.creator !== requestingUserId) {
+        if (!requestingUserId.equals(updatedSubtask.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: updatedSubtask.creator,
-                message: `The subtask ${updatedSubtask.title} in your task ${task.title} has been updated.`,
+                message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
                 subtaskId: updatedSubtask._id as Types.ObjectId,
             });
 
@@ -276,6 +279,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
 export const updateSubtaskStatus = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
@@ -318,12 +322,12 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         await subtask.save({ session, validateBeforeSave: true });
 
         // Notify the task admin (task creator) if they didn't update the status
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `The status of subtask ${subtask.title} has been updated to ${status}.`,
+                message: `${username?.toLocaleUpperCase()} updated the status of subtask ${subtask.title} of ${task.title} to ${status}.`,
                 subtaskId: subtask._id as Types.ObjectId,
             });
 
@@ -334,13 +338,12 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         }
 
         // Notify the subtask creator (subtask admin) if they didn't update the status
-        if (subtask.creator !== requestingUserId) {
+        if (!requestingUserId.equals(subtask.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: subtask.creator,
-                message: `The status of your subtask ${subtask.title} has been updated to ${status}.`,
-                taskId: task._id as Types.ObjectId,
+                message: `${username?.toLocaleUpperCase()} updated the status of the subtask ${subtask.title} of ${task.title} to ${status}.`,
                 subtaskId: subtask._id as Types.ObjectId,
             });
 
@@ -353,12 +356,12 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         // Notify all assigned users except the updater(requesting user)
         const assignedTo = subtask.assignedTo;
         for (const userId of assignedTo) {
-            if (userId !== requestingUserId) {
+            if (!requestingUserId.equals(userId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `The status of subtask ${subtask.title} has been updated to ${status}.`,
+                    message: `${username?.toLocaleUpperCase()} updated the status of subtask ${subtask.title} of ${task.title} to ${status}.`,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
 
@@ -383,6 +386,7 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
 export const deleteSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
 
@@ -405,12 +409,12 @@ export const deleteSubtask = async (req: Request, res: Response) => {
         const task = await Task.findById(subtask.taskId);
         if (task) {
             // Notify the task creator (admin)
-            if (task.creator !== requestingUserId) {
+            if (!requestingUserId.equals(task.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: task.creator,
-                    message: `The subtask ${subtask.title} has been deleted from your task ${task.title}.`,
+                    message: `${username?.toLocaleUpperCase()} deleted the subtask ${subtask.title} of ${task.title}.`,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
 
@@ -421,12 +425,12 @@ export const deleteSubtask = async (req: Request, res: Response) => {
             }
 
             // Notify the subtask creator (admin)
-            if (subtask.creator !== requestingUserId) {
+            if (!requestingUserId.equals(subtask.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: subtask.creator,
-                    message: `Your subtask ${subtask.title} has been deleted.`,
+                    message: `${username?.toLocaleUpperCase()} deleted the subtask ${subtask.title} of ${task.title}.`,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
 
@@ -439,13 +443,12 @@ export const deleteSubtask = async (req: Request, res: Response) => {
             // Notify the subtask assignees execpt the deletor
             const assignedTo = subtask.assignedTo;
             for (const userId of assignedTo) {
-                if (userId !== requestingUserId) {
+                if (!requestingUserId.equals(userId)) {
                     const result = await createNotification({
                         session,
                         originatorId: requestingUserId,
                         recipientId: userId,
-                        message: `The subtask ${subtask.title} has been deleted.`,
-                        taskId: task._id as Types.ObjectId,
+                        message: `${username?.toLocaleUpperCase()} deleted the subtask ${subtask.title} of ${task.title}.`,
                         subtaskId: subtask._id as Types.ObjectId,
                     });
 
@@ -644,13 +647,12 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         }
 
         // Notify the task creator (admin)
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `${username} commented to your subtask ${subtask.title} of your task ${task.title}: ${text}`,
-                taskId: task._id as Types.ObjectId,
+                message: `${username} commented ${text} on your subtask ${subtask.title} of ${task.title}.`,
                 subtaskId: subtask._id as Types.ObjectId,
             });
 
@@ -661,13 +663,12 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         }
 
         // Notify the subtask creator (admin)
-        if (subtask.creator !== requestingUserId) {
+        if (!requestingUserId.equals(subtask.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: subtask.creator,
-                message: `${username} commented to your subtask ${subtask.title}: ${text} of the task ${task.title}: ${text}`,
-                taskId: task._id as Types.ObjectId,
+                message: `${username} commented ${text} on your subtask ${subtask.title} of ${task.title}.`,
                 subtaskId: subtask._id as Types.ObjectId,
             });
 
@@ -680,12 +681,12 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         // Notify the subtask assignees
         const assignedTo = subtask.assignedTo;
         for (const userId of assignedTo) {
-            if (userId !== requestingUserId) {
+            if (!requestingUserId.equals(userId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `A new comment has been added to the subtask ${subtask.title}: ${text}`,
+                    message: `${username?.toLocaleUpperCase()} commented ${text} on the subtask ${subtask.title} of ${task.title}.`,
                     subtaskId: subtask._id as Types.ObjectId,
                 });
 
@@ -696,10 +697,10 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
             }
         };
 
-        const populatedSubtask = await Subtask.findById(subtask._id, { session }).populate({
+        const populatedSubtask = await Subtask.findById(subtask._id).populate({
             path: 'comments.userId',
             select: 'username email',
-        });
+        }).session(session);
 
         if (!populatedSubtask) {
             res.status(500).json({ message: 'Failed to fetch comment after comment add!' });
@@ -714,7 +715,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        res.status(500).json({ message: 'Error adding comment to subtask', error });
+        res.status(500).json({ message: 'Error adding comment to subtask!', error });
     }
 };
 
@@ -746,7 +747,7 @@ export const editSubtaskComment = async (req: Request, res: Response) => {
             return;
         }
 
-        if (comment.userId._id !== requestingUserId) {
+        if (!requestingUserId.equals(comment.userId._id)) {
             res.status(403).json({ message: 'You are not authorized to edit this comment' });
             return;
         }
@@ -792,7 +793,7 @@ export const deleteSubtaskComment = async (req: Request, res: Response) => {
         }
 
         const task = subtask.taskId as ITask;
-        if (subtask.comments[commentIndex].userId !== requestingUserId && subtask.creator !== requestingUserId && task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(subtask.comments[commentIndex].userId) && !requestingUserId.equals(subtask.creator) && !requestingUserId.equals(task.creator)) {
             res.status(403).json({ message: 'You are not authorized to delete this comment' });
             return;
         }

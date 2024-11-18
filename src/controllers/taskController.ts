@@ -10,6 +10,8 @@ const validPriorities = ['low', 'medium', 'high'];
 // Admin: Create a Task
 export const createTask = async (req: Request, res: Response) => {
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
+
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
@@ -27,14 +29,15 @@ export const createTask = async (req: Request, res: Response) => {
         // Initialize assignedTo to an empty array if not provided
         const assignedUsers = Array.isArray(assignedTo) ? assignedTo : [];
 
-        // Create the task
-        const task = await Task.create({
+        const task = new Task({
             title,
             description,
             priority,
             creator: req.user?.id,
             assignedTo: assignedUsers.length > 0 ? assignedUsers : undefined,
-        }, { session }) as unknown as ITask;
+        });
+
+        await task.save({ session });
 
         // Create notifications for all assigned users if there are any
         if (assignedUsers.length > 0) {
@@ -44,7 +47,7 @@ export const createTask = async (req: Request, res: Response) => {
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `You have been assigned to the task: ${task.title}`,
+                    message: `${username?.toLocaleUpperCase()} assigned you to task ${task.title}.`,
                     taskId: task._id as Types.ObjectId,
                 });
 
@@ -92,6 +95,7 @@ export const getTaskById = async (req: Request, res: Response) => {
 export const updateTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
@@ -178,7 +182,7 @@ export const updateTask = async (req: Request, res: Response) => {
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `You have been assigned to the task: ${updatedTask.title}`,
+                    message: `${username?.toLocaleUpperCase()} assigned you to the task ${updatedTask.title}.`,
                     taskId: updatedTask._id as Types.ObjectId,
                 });
 
@@ -193,7 +197,7 @@ export const updateTask = async (req: Request, res: Response) => {
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `You have been removed form the task: ${updatedTask.title}`,
+                    message: `${username?.toLocaleUpperCase()} removed you form the task ${updatedTask.title}.`,
                     taskId: updatedTask._id as Types.ObjectId,
                 });
 
@@ -211,8 +215,6 @@ export const updateTask = async (req: Request, res: Response) => {
         await session.abortTransaction();
         session.endSession();
         res.status(500).json({ message: 'Error updating task!', error });
-        console.log(error);
-
     }
 };
 
@@ -220,6 +222,7 @@ export const updateTask = async (req: Request, res: Response) => {
 export const updateTaskStatus = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
@@ -255,12 +258,12 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         await task.save({ session, validateBeforeSave: true });
 
         // Notify the creator if they are not the one making the change
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `The status of task ${task.title} has been updated to ${status}.`,
+                message: `${username?.toLocaleUpperCase()} updated the status of task ${task.title} to ${status}.`,
                 taskId: task._id as Types.ObjectId,
             });
 
@@ -273,12 +276,12 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         // Notify assigned users, excluding the one making the change
         const assignedTo = task.assignedTo;
         for (const userId of assignedTo) {
-            if (userId !== requestingUserId) {
+            if (!requestingUserId.equals(userId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `The status of task ${task.title} has been updated to ${status}.`,
+                    message: `${username?.toLocaleUpperCase()} updated the status of task ${task.title} to ${status}.`,
                     taskId: task._id as Types.ObjectId,
                 });
 
@@ -303,6 +306,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
 export const deleteTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const requestingUserId = new Types.ObjectId(req.user?.id);
+    const username = req.user?.username;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
 
@@ -331,7 +335,7 @@ export const deleteTask = async (req: Request, res: Response) => {
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `The task ${task.title} has been deleted.`,
+                    message: `${username?.toLocaleUpperCase()} deleted the task ${task.title}.`,
                     taskId: task._id as Types.ObjectId,
                 });
 
@@ -373,7 +377,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const requestingUserId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     const filters: any = {};
 
@@ -413,7 +417,7 @@ export const getMyTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const requestingUserId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     const filters: any = { creator: requestingUserId };
 
@@ -446,7 +450,7 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
         page?: number;
         limit?: number;
     };
-    const requestingUserId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     const filters: any = { assignedTo: requestingUserId };
 
@@ -510,12 +514,12 @@ export const addCommentToTask = async (req: Request, res: Response) => {
         await task.save({ session });
 
         // Notify the creator if they are not the one adding the comment
-        if (task.creator !== requestingUserId) {
+        if (!requestingUserId.equals(task.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
                 recipientId: task.creator,
-                message: `${username} commented to your task ${task.title}: ${text}`,
+                message: `${username?.toLocaleUpperCase()} commented ${text} on your task ${task.title}.`,
                 taskId: task._id as Types.ObjectId,
             });
 
@@ -529,12 +533,12 @@ export const addCommentToTask = async (req: Request, res: Response) => {
         const assignedTo = task.assignedTo;
 
         for (const userId of assignedTo) {
-            if (userId !== requestingUserId) {
+            if (!requestingUserId.equals(userId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
                     recipientId: userId,
-                    message: `${username} commented to your task ${task.title}: ${text}`,
+                    message: `${username?.toLocaleUpperCase()} commented ${text} on your task ${task.title}.`,
                     taskId: task._id as Types.ObjectId,
                 });
 
@@ -545,21 +549,21 @@ export const addCommentToTask = async (req: Request, res: Response) => {
             }
         };
 
-        const populatedTask = await Task.findById(task._id, { session }).populate({
+        const populatedTask = await Task.findById(taskId).populate({
             path: 'comments.userId',
             select: 'username email',
-        });
+        }).session(session);
 
         if (!populatedTask) {
             res.status(500).json({ message: 'Failed to fetch comment after comment add!' });
             return;
         }
 
-        const pupulatedComment = populatedTask.comments.id(comment._id);
+        const populatedComment = populatedTask.comments.id(comment._id);
 
         await session.commitTransaction();
         session.endSession();
-        res.json({ comment: pupulatedComment, message: 'Comment added!' });
+        res.json({ comment: populatedComment, message: 'Comment added!' });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -595,7 +599,7 @@ export const editTaskComment = async (req: Request, res: Response) => {
             return;
         }
 
-        if (comment.userId._id !== requestingUserId) {
+        if (!requestingUserId.equals(comment.userId._id)) {
             res.status(403).json({ message: 'You are not authorized to edit this comment' });
             return;
         }
@@ -613,7 +617,7 @@ export const editTaskComment = async (req: Request, res: Response) => {
 // Delete task Comment
 export const deleteTaskComment = async (req: Request, res: Response) => {
     const { taskId, commentId } = req.params;
-    const requestingUserId = req.user?.id;
+    const requestingUserId = new Types.ObjectId(req.user?.id);
 
     if (!Types.ObjectId.isValid(taskId) || !Types.ObjectId.isValid(commentId)) {
         res.status(400).json({ message: 'Invalid Request' });
@@ -637,7 +641,7 @@ export const deleteTaskComment = async (req: Request, res: Response) => {
             return;
         }
 
-        if (task.comments[commentIndex].userId.toString() !== requestingUserId && task.creator.toString() !== requestingUserId) {
+        if (!requestingUserId.equals(task.comments[commentIndex].userId) && !requestingUserId.equals(task.creator)) {
             res.status(403).json({ message: 'You are not authorized to delete this comment' });
             return;
         }
