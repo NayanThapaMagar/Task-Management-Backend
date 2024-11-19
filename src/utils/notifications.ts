@@ -1,8 +1,8 @@
 import Notification from '../models/notificationModel';
 import mongoose, { Types } from 'mongoose';
-import { io } from '../server'; // Import Socket.IO instance
+import { io } from '../server';
+import { userSockets } from '../config/socket'
 
-// Helper function to create notifications
 export const createNotification = async ({
     session,
     originatorId,
@@ -28,8 +28,18 @@ export const createNotification = async ({
         });
         await notification.save({ session });
 
-        // Emit the notification to the specific user via Socket.IO
-        io.to(recipientId.toString()).emit('newNotification', notification);
+        const newNotification = await Notification.findById(notification._id).populate({
+            path: 'originatorId',
+            select: 'username email',
+        }).populate('taskId').populate('subtaskId').session(session);
+
+        const socketId = userSockets[recipientId.toString()];
+
+        if (socketId && newNotification) {
+            io.to(socketId).emit('newNotification', newNotification.toObject());
+        } else {
+            console.warn(`User with ID ${recipientId.toString()} is not connected`);
+        }
 
         return { success: true };
     } catch (error) {

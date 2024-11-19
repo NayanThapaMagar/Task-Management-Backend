@@ -149,6 +149,47 @@ export const markAllNotificationsRead = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error marking all notifications as read' });
     }
 };
+// Mark All Notifications as Seen
+export const markAllNotificationsSeen = async (req: Request, res: Response) => {
+    const { page = '1', limit = '10' } = req.query as { page?: string; limit?: string };
+    const recipientId = new Types.ObjectId(req.user?.id);
+
+    if (!recipientId) {
+        res.status(400).json({ message: 'Invalid Request!!' });
+        return;
+    }
+
+    try {
+        const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
+
+        const notificationUpdateResponse = await Notification.updateMany({ recipientId, isSeen: false }, { isSeen: true });
+
+        if (!notificationUpdateResponse) {
+            res.status(500).json({ message: 'Error marking all notifications as seen' });
+            return;
+        }
+
+        const notifications = await Notification.find({ recipientId })
+            .sort({ createdAt: -1 })
+            .skip(offset)
+            .limit(pageLimit)
+            .populate({
+                path: 'originatorId',
+                select: 'username email',
+            })
+            .populate('taskId')
+            .populate('subtaskId');
+
+        if (!notifications) {
+            res.status(500).json({ message: 'Error fetching all notifications after marking as seen' });
+            return;
+        }
+
+        res.status(200).json({ updatedNotifications: notifications, message: 'All notifications marked as seen' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error marking all notifications as seen' });
+    }
+};
 
 // Delete Notification
 export const deleteNotification = async (req: Request, res: Response) => {

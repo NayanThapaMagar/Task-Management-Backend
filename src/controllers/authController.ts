@@ -27,7 +27,7 @@ export const registerUser: RequestHandler = async (req: Request, res: Response) 
         }
         const hashedPassword = await bcrypt.hash(password, 10);
         const newUser = await User.create({ username, email, password: hashedPassword });
-        const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET || '', {
+        const token = jwt.sign({ id: newUser._id, email }, process.env.JWT_SECRET || '', {
             expiresIn: '1h',
         });
         res.status(201).json({ token, user: { id: newUser._id, username, email } });
@@ -51,7 +51,7 @@ export const loginUser: RequestHandler = async (req: Request, res: Response) => 
             res.status(400).json({ message: 'Incorrect password' });
             return;
         }
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || '', {
+        const token = jwt.sign({ id: user._id, email }, process.env.JWT_SECRET || '', {
             expiresIn: '1h',
         });
         res.status(200).json({ token, user: { id: user._id, username: user.username, email: user.email } });

@@ -9,13 +9,15 @@ import userConnectionRoutes from './routes/userConnectionRoutes';
 import taskRoutes from './routes/taskRoutes';
 import subtaskRoutes from './routes/subtaskRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import { setupSocket } from './config/socket';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const corsOptions = {
-  origin: '*',
+  origin: 'http://localhost:3000',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
 };
 
 // Create HTTP server
@@ -28,20 +30,10 @@ export const io = new Server(server, {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Socket.IO connection
-io.on('connection', (socket) => {
-  console.log('New client connected:', socket.id);
 
-  // Join user-specific rooms based on userId
-  socket.on('joinRoom', (userId) => {
-    socket.join(userId);
-    console.log(`User ${userId} joined room`);
-  });
+// custom socket setup
+setupSocket(io);
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
 
 // Routes
 app.use('/auth', authRoutes);

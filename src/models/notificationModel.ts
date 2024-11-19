@@ -8,6 +8,7 @@ interface INotification extends Document {
   taskId?: Types.ObjectId;
   subtaskId?: Types.ObjectId;
   isRead: boolean;
+  isSeen: boolean;
   createdAt: Date;
 }
 
@@ -20,6 +21,7 @@ const NotificationSchema = new Schema<INotification>(
     taskId: { type: Schema.Types.ObjectId, ref: 'Task' },
     subtaskId: { type: Schema.Types.ObjectId, ref: 'Subtask' },
     isRead: { type: Boolean, default: false },
+    isSeen: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
