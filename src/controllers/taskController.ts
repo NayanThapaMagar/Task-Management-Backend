@@ -137,6 +137,11 @@ export const updateTask = async (req: Request, res: Response) => {
             !allAssignedUsers.some(newUser => newUser.equals(user))
         );
 
+        // check actual content update
+        const isContentUpdated = (updates: any): boolean => {
+            const { title, description, priority } = updates;
+            return Boolean(title || description || priority);
+        };
         // Compare new values with existing values
         const updates: any = {};
         if (title && title !== existingTask.title) updates.title = title;
@@ -204,6 +209,29 @@ export const updateTask = async (req: Request, res: Response) => {
                 if (!result.success) {
                     res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
                     return;
+                }
+            };
+        }
+
+        // Check for content updates (excluding assignedTo)
+        const hasContentUpdate = isContentUpdated(updates);
+
+        if (hasContentUpdate) {
+            // Create notifications for assigned users 
+            for (const userId of allAssignedUsers) {
+                if (!userId.equals(requestingUserId) && !userId.equals(updatedTask.creator)) {
+                    const result = await createNotification({
+                        session,
+                        originatorId: requestingUserId,
+                        recipientId: userId,
+                        message: `${username?.toLocaleUpperCase()} updated the task ${updatedTask.title}.`,
+                        taskId: updatedTask._id as Types.ObjectId,
+                    });
+
+                    if (!result.success) {
+                        res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                        return;
+                    }
                 }
             };
         }
@@ -276,7 +304,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         // Notify assigned users, excluding the one making the change
         const assignedTo = task.assignedTo;
         for (const userId of assignedTo) {
-            if (!requestingUserId.equals(userId)) {
+            if (!userId.equals(requestingUserId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
@@ -399,6 +427,7 @@ export const getAllTasks = async (req: Request, res: Response) => {
             ],
             ...filters
         })
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -432,6 +461,7 @@ export const getMyTasks = async (req: Request, res: Response) => {
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const tasks = await Task.find(filters)
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -465,6 +495,7 @@ export const getAssignedTasks = async (req: Request, res: Response) => {
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const tasks = await Task.find(filters)
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -533,7 +564,7 @@ export const addCommentToTask = async (req: Request, res: Response) => {
         const assignedTo = task.assignedTo;
 
         for (const userId of assignedTo) {
-            if (!requestingUserId.equals(userId)) {
+            if (!userId.equals(requestingUserId)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
@@ -658,6 +689,7 @@ export const deleteTaskComment = async (req: Request, res: Response) => {
 // get all task comments
 export const getAllCommentsForTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
 
     const isValidObjectId = Types.ObjectId.isValid(taskId);
     if (!isValidObjectId) {
@@ -666,6 +698,8 @@ export const getAllCommentsForTask = async (req: Request, res: Response) => {
     }
 
     try {
+        const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
+
         const task = await Task.findById(taskId).populate({
             path: 'comments.userId',
             select: 'username email',
@@ -675,7 +709,18 @@ export const getAllCommentsForTask = async (req: Request, res: Response) => {
             return;
         }
 
-        res.json({ comments: task.comments, message: 'Comments fetched successfully!' });
+        const totalComments = task.comments.length;
+        const paginatedComments = task.comments
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            .slice(offset, Number(page) * pageLimit);
+
+        res.json({
+            comments: paginatedComments,
+            totalComments,
+            page: Number(page),
+            totalPages: Math.ceil(totalComments / pageLimit),
+            message: 'Comments fetched successfully!'
+        });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching comments for task', error });
     }

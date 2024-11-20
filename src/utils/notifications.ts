@@ -37,9 +37,7 @@ export const createNotification = async ({
 
         if (socketId && newNotification) {
             io.to(socketId).emit('newNotification', newNotification.toObject());
-        } else {
-            console.warn(`User with ID ${recipientId.toString()} is not connected`);
-        }
+        } 
 
         return { success: true };
     } catch (error) {

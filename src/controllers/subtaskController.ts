@@ -34,10 +34,10 @@ export const createSubtask = async (req: Request, res: Response) => {
         const assignedUsers = (assignedTo as string[] || []).map(user => new Types.ObjectId(user));
 
         for (const user of assignedUsers) {
-            if (!task.assignedTo.includes(user)) {
-                const notAssigneduser = await User.findById(user)
-                if (notAssigneduser) {
-                    res.status(422).json({ message: `${notAssigneduser.username.toUpperCase()} must be first assigned to ${task.title}` });
+            if (!task.assignedTo.includes(user) && !task.creator.equals(user)) {
+                const notAssignedAndNonCreatorUser = await User.findById(user)
+                if (notAssignedAndNonCreatorUser) {
+                    res.status(422).json({ message: `${notAssignedAndNonCreatorUser.username.toUpperCase()} must be first assigned to ${task.title}` });
                 } else {
                     res.status(422).json({ message: `User must be first assigned to ${task.title}` });
                 }
@@ -160,6 +160,13 @@ export const updateSubtask = async (req: Request, res: Response) => {
         // Prepare updates
         const task = existingSubtask.taskId as unknown as ITask;
 
+
+        // check actual content update
+        const isContentUpdated = (updates: any): boolean => {
+            const { title, description, priority } = updates;
+            return Boolean(title || description || priority);
+        };
+
         // Compare new values with existing values
         const updates: any = {};
         if (title && title !== existingSubtask.title) updates.title = title;
@@ -178,10 +185,10 @@ export const updateSubtask = async (req: Request, res: Response) => {
         }
 
         for (const user of allAssignedUsers) {
-            if (!task.assignedTo.includes(user)) {
-                const notAssigneduser = await User.findById(user)
-                if (notAssigneduser) {
-                    res.status(422).json({ message: `${notAssigneduser.username.toUpperCase()} must be first assigned to ${task.title}` });
+            if (!task.assignedTo.includes(user) && !task.creator.equals(user)) {
+                const notAssignedAndNonCreatorUser = await User.findById(user)
+                if (notAssignedAndNonCreatorUser) {
+                    res.status(422).json({ message: `${notAssignedAndNonCreatorUser.username.toUpperCase()} must be first assigned to ${task.title}` });
                 } else {
                     res.status(422).json({ message: `User must be first assigned to ${task.title}` });
                 }
@@ -202,7 +209,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
         if (assignedTo !== undefined) {
             // Notify newly assigned users, excluding the updater
             for (const userId of addedUsers) {
-                if (!requestingUserId.equals(userId)) {
+                if (!userId.equals(requestingUserId)) {
                     const result = await createNotification({
                         session,
                         originatorId: requestingUserId,
@@ -235,35 +242,59 @@ export const updateSubtask = async (req: Request, res: Response) => {
             };
         }
 
-        // Notify task admin if they are not the updater
-        if (!requestingUserId.equals(task.creator)) {
-            const result = await createNotification({
-                session,
-                originatorId: requestingUserId,
-                recipientId: task.creator,
-                message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
-                subtaskId: updatedSubtask._id as Types.ObjectId,
-            });
+        // Check for content updates (excluding assignedTo)
+        const hasContentUpdate = isContentUpdated(updates);
 
-            if (!result.success) {
-                res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
-                return;
-            }
-        }
-        // Notify the subtask creator (subtask admin) if they didn't update the status
-        if (!requestingUserId.equals(updatedSubtask.creator)) {
-            const result = await createNotification({
-                session,
-                originatorId: requestingUserId,
-                recipientId: updatedSubtask.creator,
-                message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
-                subtaskId: updatedSubtask._id as Types.ObjectId,
-            });
+        // notify about content update
+        if (hasContentUpdate) {
+            // Notify task admin if they are not the updater
+            if (!requestingUserId.equals(task.creator)) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: task.creator,
+                    message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
+                    subtaskId: updatedSubtask._id as Types.ObjectId,
+                });
 
-            if (!result.success) {
-                res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
-                return;
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
             }
+            // Notify the subtask creator (subtask admin) if they didn't update 
+            if (!requestingUserId.equals(updatedSubtask.creator)) {
+                const result = await createNotification({
+                    session,
+                    originatorId: requestingUserId,
+                    recipientId: updatedSubtask.creator,
+                    message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
+                    subtaskId: updatedSubtask._id as Types.ObjectId,
+                });
+
+                if (!result.success) {
+                    res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                    return;
+                }
+            }
+
+            // notifing assigned users except the creators of task or subtask
+            for (const userId of allAssignedUsers) {
+                if (!userId.equals(task.creator) && !userId.equals(updatedSubtask.creator) && !userId.equals(requestingUserId)) {
+                    const result = await createNotification({
+                        session,
+                        originatorId: requestingUserId,
+                        recipientId: userId,
+                        message: `${username?.toLocaleUpperCase()} updated the subtask ${updatedSubtask.title} of ${task.title}.`,
+                        subtaskId: updatedSubtask._id as Types.ObjectId,
+                    });
+
+                    if (!result.success) {
+                        res.status(500).json({ message: result.error || 'An error occurred while creating notification' });
+                        return;
+                    }
+                }
+            };
         }
 
         await session.commitTransaction();
@@ -272,7 +303,9 @@ export const updateSubtask = async (req: Request, res: Response) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        res.status(500).json({ message: 'Error updating subtask', error });
+        console.log(error);
+
+        res.status(500).json({ message: 'Error updating subtask!', error });
     }
 };
 
@@ -356,7 +389,7 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         // Notify all assigned users except the updater(requesting user)
         const assignedTo = subtask.assignedTo;
         for (const userId of assignedTo) {
-            if (!requestingUserId.equals(userId)) {
+            if (!userId.equals(requestingUserId) && !userId.equals(task.creator) && !userId.equals(subtask.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
@@ -443,7 +476,7 @@ export const deleteSubtask = async (req: Request, res: Response) => {
             // Notify the subtask assignees execpt the deletor
             const assignedTo = subtask.assignedTo;
             for (const userId of assignedTo) {
-                if (!requestingUserId.equals(userId)) {
+                if (!userId.equals(task.creator) && !userId.equals(subtask.creator) && !requestingUserId.equals(userId)) {
                     const result = await createNotification({
                         session,
                         originatorId: requestingUserId,
@@ -506,6 +539,7 @@ export const getAllSubtasksForTask = async (req: Request, res: Response) => {
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const subtasks = await Subtask.find(filters)
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -548,6 +582,7 @@ export const getMySubtasksForTask = async (req: Request, res: Response) => {
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const subtasks = await Subtask.find(filters)
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -590,6 +625,7 @@ export const getAssignedSubtasksForTask = async (req: Request, res: Response) =>
     try {
         const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
         const subtasks = await Subtask.find(filters)
+            .sort({ createdAt: -1 })
             .skip(offset)
             .limit(pageLimit);
 
@@ -681,7 +717,7 @@ export const addCommentToSubtask = async (req: Request, res: Response) => {
         // Notify the subtask assignees
         const assignedTo = subtask.assignedTo;
         for (const userId of assignedTo) {
-            if (!requestingUserId.equals(userId)) {
+            if (!userId.equals(requestingUserId) && !userId.equals(task.creator) && !userId.equals(subtask.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
@@ -810,6 +846,7 @@ export const deleteSubtaskComment = async (req: Request, res: Response) => {
 // get all subtask comments
 export const getAllCommentsForSubtask = async (req: Request, res: Response) => {
     const { subtaskId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
 
     const isValidObjectId = Types.ObjectId.isValid(subtaskId);
     if (!isValidObjectId) {
@@ -818,16 +855,30 @@ export const getAllCommentsForSubtask = async (req: Request, res: Response) => {
     }
 
     try {
+        const { offset, limit: pageLimit } = getPagination(Number(page), Number(limit));
+
         const subtask = await Subtask.findById(subtaskId).populate({
             path: 'comments.userId',
             select: 'username email',
         });
+
         if (!subtask) {
-            res.status(404).json({ message: 'Subtask not found' });
+            res.status(404).json({ message: 'Subtask not found!' });
             return;
         }
 
-        res.json({ comments: subtask.comments, message: 'Comments fetched successfully!' });
+        const totalComments = subtask.comments.length;
+        const paginatedComments = subtask.comments
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) 
+            .slice(offset, Number(page) * pageLimit);
+
+        res.json({
+            comments: paginatedComments,
+            totalComments,
+            page: Number(page),
+            totalPages: Math.ceil(totalComments / pageLimit),
+            message: 'Comments fetched successfully!',
+        });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching comments for subtask', error });
     }
