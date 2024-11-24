@@ -371,7 +371,7 @@ export const updateSubtaskStatus = async (req: Request, res: Response) => {
         }
 
         // Notify the subtask creator (subtask admin) if they didn't update the status
-        if (!requestingUserId.equals(subtask.creator)) {
+        if (!requestingUserId.equals(subtask.creator) && !task.creator.equals(subtask.creator)) {
             const result = await createNotification({
                 session,
                 originatorId: requestingUserId,
@@ -458,7 +458,7 @@ export const deleteSubtask = async (req: Request, res: Response) => {
             }
 
             // Notify the subtask creator (admin)
-            if (!requestingUserId.equals(subtask.creator)) {
+            if (!requestingUserId.equals(subtask.creator) && !task.creator.equals(subtask.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
@@ -869,7 +869,7 @@ export const getAllCommentsForSubtask = async (req: Request, res: Response) => {
 
         const totalComments = subtask.comments.length;
         const paginatedComments = subtask.comments
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) 
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(offset, Number(page) * pageLimit);
 
         res.json({

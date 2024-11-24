@@ -304,7 +304,7 @@ export const updateTaskStatus = async (req: Request, res: Response) => {
         // Notify assigned users, excluding the one making the change
         const assignedTo = task.assignedTo;
         for (const userId of assignedTo) {
-            if (!userId.equals(requestingUserId)) {
+            if (!userId.equals(requestingUserId) && !userId.equals(task.creator)) {
                 const result = await createNotification({
                     session,
                     originatorId: requestingUserId,
