@@ -31,13 +31,13 @@ export const setupSocket = (io: Server): void => {
     // Handle connection events
     io.on('connection', (socket: Socket) => {
         const user = (socket as any).user;
-        console.log(`User connected: ${user.email}`);
+        // console.log(`User connected: ${user.email}`);
 
 
         // Handle disconnection
         socket.on('disconnect', () => {
             delete userSockets[user.id]; 
-            console.log(`User disconnected: ${user.email}`);
+            // console.log(`User disconnected: ${user.email}`);
         });
     });
 };
