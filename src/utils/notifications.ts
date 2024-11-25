@@ -41,7 +41,7 @@ export const createNotification = async ({
 
         return { success: true };
     } catch (error) {
-        console.error('Error creating notification:', error);
+        // console.error('Error creating notification:', error);
         return { success: false, error: 'Failed to create notification' };
     }
 };

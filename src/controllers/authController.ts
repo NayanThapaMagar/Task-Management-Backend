@@ -32,7 +32,7 @@ export const registerUser: RequestHandler = async (req: Request, res: Response) 
         });
         res.status(201).json({ token, user: { id: newUser._id, username, email } });
     } catch (error) {
-        console.error(error);
+        // console.error(error);
         res.status(500).json({ message: 'Internal server error' });
     }
 };
@@ -56,7 +56,7 @@ export const loginUser: RequestHandler = async (req: Request, res: Response) => 
         });
         res.status(200).json({ token, user: { id: user._id, username: user.username, email: user.email } });
     } catch (error) {
-        console.error(error);
+        // console.error(error);
         res.status(500).json({ message: 'Internal server error' });
     }
 };

@@ -303,8 +303,7 @@ export const updateSubtask = async (req: Request, res: Response) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        console.log(error);
-
+        // console.log(error);
         res.status(500).json({ message: 'Error updating subtask!', error });
     }
 };
